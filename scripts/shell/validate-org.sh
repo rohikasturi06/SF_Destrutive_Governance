@@ -6,6 +6,7 @@ mkdir -p reports
 echo "[VALIDATION] Starting check-only validation against target org"
 echo "[VALIDATION] Org alias: ${SF_ALIAS:-ci-org}"
 echo "[VALIDATION] Source dir: src/salesforce/force-app"
+echo "[VALIDATION] Preparing executive summary and change log"
 
 summarize_manifest() {
   local file_path="$1"
@@ -54,20 +55,54 @@ summarize_manifest() {
   echo "- Repository: ${GITHUB_REPOSITORY:-local-run}"
   echo "- Run ID: ${GITHUB_RUN_ID:-local-run}"
   echo "- Branch/Ref: ${GITHUB_REF_NAME:-local}"
+  echo "- Base SHA: ${BASE_SHA:-n/a}"
+  echo "- Head SHA: ${HEAD_SHA:-n/a}"
   echo ""
 } > reports/executive-summary.md
+
+{
+  echo "## Validations Executed"
+  echo ""
+  echo "- Salesforce authentication/session verification"
+  echo "- SGD delta generation from git diff"
+  echo "- Manifest inspection (`package.xml` + `destructiveChanges.xml`)"
+  echo "- Check-only deployment validation against target org"
+  echo ""
+} >> reports/executive-summary.md
+
+{
+  echo "## Git Delta Changed Files"
+  echo ""
+  echo "| File |"
+  echo "|---|"
+} >> reports/executive-summary.md
+
+if [[ -n "${BASE_SHA:-}" && -n "${HEAD_SHA:-}" ]]; then
+  git diff --name-only "${BASE_SHA}" "${HEAD_SHA}" | head -200 | while IFS= read -r file; do
+    [[ -n "$file" ]] && echo "| ${file} |" >> reports/executive-summary.md
+  done
+else
+  echo "| Base/head SHA not supplied |" >> reports/executive-summary.md
+fi
+echo "" >> reports/executive-summary.md
 
 summarize_manifest "manifest/package.xml" "Package Manifest"
 summarize_manifest "manifest/destructiveChanges.xml" "Destructive Manifest"
 
-sf project deploy start \
-  --source-dir src/salesforce/force-app \
-  --target-org "${SF_ALIAS:-ci-org}" \
-  --dry-run \
-  --test-level NoTestRun \
-  --wait 30 \
-  --verbose \
-  --json | tee reports/org-validation-result.json
+DEPLOY_CMD=(sf project deploy start --target-org "${SF_ALIAS:-ci-org}" --dry-run --test-level NoTestRun --wait 30 --verbose --json)
+
+if [[ -f "manifest/package.xml" ]]; then
+  DEPLOY_CMD+=(--manifest manifest/package.xml)
+  if [[ -f "manifest/destructiveChanges.xml" ]]; then
+    DEPLOY_CMD+=(--post-destructive-changes manifest/destructiveChanges.xml)
+  fi
+  echo "[VALIDATION] Running manifest-based check-only deploy"
+else
+  DEPLOY_CMD+=(--source-dir src/salesforce/force-app)
+  echo "[VALIDATION] Running source-dir check-only deploy"
+fi
+
+"${DEPLOY_CMD[@]}" | tee reports/org-validation-result.json
 
 STATUS=$(jq -r '.result.status // "Unknown"' reports/org-validation-result.json)
 DEPLOY_ID=$(jq -r '.result.id // "n/a"' reports/org-validation-result.json)

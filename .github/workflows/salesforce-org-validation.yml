@@ -42,6 +42,10 @@ jobs:
       - name: Install Salesforce CLI
         run: npm install --global @salesforce/cli
 
+      - name: Install SGD plugin
+        run: |
+          echo y | sf plugins install sfdx-git-delta
+
       - name: Install jq
         run: |
           sudo apt-get update -y
@@ -64,7 +68,47 @@ jobs:
           sf org display --target-org "$SF_ALIAS" >/dev/null 2>&1
           echo "Salesforce org authentication succeeded for alias: $SF_ALIAS"
 
+      - name: Generate SGD manifest delta
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          mkdir -p manifest
+          if [ -z "$BASE_SHA" ] || [ "$BASE_SHA" = "null" ]; then
+            BASE_SHA=$(git rev-list --max-parents=0 HEAD)
+          fi
+          if [ -z "$HEAD_SHA" ] || [ "$HEAD_SHA" = "null" ]; then
+            HEAD_SHA=$(git rev-parse HEAD)
+          fi
+          echo "Using BASE_SHA=$BASE_SHA"
+          echo "Using HEAD_SHA=$HEAD_SHA"
+
+          sf sgd source delta \
+            --from "$BASE_SHA" \
+            --to "$HEAD_SHA" \
+            --output-dir manifest \
+            --source-dir src/salesforce/force-app \
+            --generate-delta >/dev/null 2>&1 || true
+
+          # Normalize common SGD output paths to manifest/package.xml and manifest/destructiveChanges.xml
+          if [ -f manifest/package/package.xml ] && [ ! -f manifest/package.xml ]; then
+            cp manifest/package/package.xml manifest/package.xml
+          fi
+          if [ -f manifest/destructiveChanges/destructiveChanges.xml ] && [ ! -f manifest/destructiveChanges.xml ]; then
+            cp manifest/destructiveChanges/destructiveChanges.xml manifest/destructiveChanges.xml
+          fi
+
+          if [ ! -f manifest/package.xml ]; then
+            printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' '<Package xmlns="http://soap.sforce.com/2006/04/metadata">' '    <version>62.0</version>' '</Package>' > manifest/package.xml
+          fi
+          if [ ! -f manifest/destructiveChanges.xml ]; then
+            printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' '<Package xmlns="http://soap.sforce.com/2006/04/metadata">' '    <version>62.0</version>' '</Package>' > manifest/destructiveChanges.xml
+          fi
+
       - name: Validate deploy (check-only)
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: bash scripts/shell/validate-org.sh
 
       - name: Publish executive summary
