@@ -1,0 +1,23 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<Profile xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fieldPermissions>
+        <editable>true</editable>
+        <field>Account.Dummy_Validation_Field_1__c</field>
+        <readable>true</readable>
+    </fieldPermissions>    <fieldPermissions>
+        <editable>true</editable>
+        <field>Account.Dummy_Validation_Field_2__c</field>
+        <readable>true</readable>
+    </fieldPermissions>    <fieldPermissions>
+        <editable>true</editable>
+        <field>Account.Dummy_Validation_Field_3__c</field>
+        <readable>true</readable>
+    </fieldPermissions>    <fieldPermissions>
+        <editable>true</editable>
+        <field>Account.Dummy_Validation_Field_4__c</field>
+        <readable>true</readable>
+    </fieldPermissions>    <fieldPermissions>
+        <editable>true</editable>
+        <field>Account.Dummy_Validation_Field_5__c</field>
+        <readable>true</readable>
+    </fieldPermissions></Profile>

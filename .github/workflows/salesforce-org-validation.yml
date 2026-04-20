@@ -63,6 +63,17 @@ jobs:
       - name: Validate deploy (check-only)
         run: bash scripts/shell/validate-org.sh
 
+      - name: Publish executive summary
+        if: always()
+        run: |
+          if [ -f reports/executive-summary.md ]; then
+            cat reports/executive-summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "## Validation Executive Summary" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "- No executive summary generated." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Upload validation artifacts
         if: always()
         uses: actions/upload-artifact@v4
