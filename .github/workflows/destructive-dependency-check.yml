@@ -1,0 +1,163 @@
+﻿name: Destructive Dependency Guard
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+    paths:
+      - "**/destructiveChanges.xml"
+      - "**/destructivechanges.xml"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: destructive-guard-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  SF_ALIAS: ci-org
+  NODE_ENV: production
+  DEP_CACHE_DIR: .cache/dependency-check
+  DEP_CACHE_VERSION: v1
+  DEP_CACHE_MAX_FILES: "250"
+  DEP_CACHE_MAX_AGE_DAYS: "30"
+
+jobs:
+  validate-destructive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Build changed files list
+        run: |
+          git diff --name-only "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}" > changed-files.txt
+          echo "Changed files:"
+          cat changed-files.txt
+
+      - name: Compute destructive fingerprint
+        id: destructive_fingerprint
+        run: |
+          DESTRUCTIVE_FILES=$(grep -Ei 'destructivechanges\.xml$' changed-files.txt || true)
+          if [ -z "$DESTRUCTIVE_FILES" ]; then
+            FINGERPRINT="no-destructive-changes"
+          else
+            FINGERPRINT=$(for f in $DESTRUCTIVE_FILES; do
+              if git cat-file -e "${{ github.event.pull_request.head.sha }}:$f" 2>/dev/null; then
+                git show "${{ github.event.pull_request.head.sha }}:$f"
+              else
+                echo "$f-deleted"
+              fi
+            done | sha256sum | awk '{print $1}')
+          fi
+          echo "fingerprint=$FINGERPRINT" >> "$GITHUB_OUTPUT"
+          echo "Destructive fingerprint: $FINGERPRINT"
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Restore dependency analysis cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.DEP_CACHE_DIR }}
+          key: dep-analysis-${{ env.DEP_CACHE_VERSION }}-${{ runner.os }}-${{ steps.destructive_fingerprint.outputs.fingerprint }}
+          restore-keys: |
+            dep-analysis-${{ env.DEP_CACHE_VERSION }}-${{ runner.os }}-
+
+      - name: Install Salesforce CLI
+        run: npm install --global @salesforce/cli
+
+      - name: Ensure helper script is executable
+        run: chmod +x scripts/shell/sf-jwt-auth.sh
+
+      - name: Create auth URL file
+        env:
+          SF_AUTH_URL: ${{ secrets.SF_AUTH_URL }}
+        run: |
+          if [ -z "$SF_AUTH_URL" ]; then
+            echo "SF_AUTH_URL is not configured."
+            exit 1
+          fi
+          printf "%s" "$SF_AUTH_URL" > sfdx_auth_url.txt
+          chmod 600 sfdx_auth_url.txt
+          echo "Auth URL file created."
+
+      - name: Authenticate to Salesforce via auth URL
+        env:
+          SF_AUTH_URL: ${{ secrets.SF_AUTH_URL }}
+          SF_ALIAS: ${{ env.SF_ALIAS }}
+        run: bash scripts/shell/sf-jwt-auth.sh
+
+      - name: Run dependency analysis
+        id: dependency_check
+        env:
+          SF_ALIAS: ${{ env.SF_ALIAS }}
+          PR_LABELS_JSON: ${{ toJson(github.event.pull_request.labels) }}
+          CACHE_MAX_FILES: ${{ env.DEP_CACHE_MAX_FILES }}
+          CACHE_MAX_AGE_DAYS: ${{ env.DEP_CACHE_MAX_AGE_DAYS }}
+          LOG_LEVEL: debug
+        run: |
+          echo "Running dependency analyzer with verbose context..."
+          echo "PR number: ${{ github.event.pull_request.number }}"
+          echo "Base SHA: ${{ github.event.pull_request.base.sha }}"
+          echo "Head SHA: ${{ github.event.pull_request.head.sha }}"
+          node scripts/dependency-check/check-destructive-dependencies.js \
+            --changed-files changed-files.txt \
+            --output-json dependency-report.json \
+            --output-md dependency-report.md \
+            --metrics-json dependency-metrics.json \
+            --cache-dir ${{ env.DEP_CACHE_DIR }} \
+            --audit-dir audit-evidence
+
+      - name: Upload dependency report artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: destructive-dependency-report
+          path: |
+            dependency-report.json
+            dependency-report.md
+            dependency-metrics.json
+            audit-evidence/**
+
+      - name: Post PR comment
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          REPORT_MD_PATH: dependency-report.md
+        with:
+          script: |
+            const fs = require('fs');
+            const path = process.env.REPORT_MD_PATH;
+            let body = 'Dependency report was not generated.';
+            if (fs.existsSync(path)) {
+              body = fs.readFileSync(path, 'utf8');
+            }
+            const issue_number = context.payload.pull_request.number;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number,
+              body,
+            });
+
+      - name: Enforce blocking policy
+        if: steps.dependency_check.outputs.has_dependencies == 'true' && steps.dependency_check.outputs.override_enabled != 'true'
+        run: |
+          echo "Dependencies detected and override not present. Blocking PR."
+          exit 1
+
+      - name: Report override usage
+        if: steps.dependency_check.outputs.has_dependencies == 'true' && steps.dependency_check.outputs.override_enabled == 'true'
+        run: |
+          echo "Dependencies detected, but force-deploy label found. Proceeding with override."

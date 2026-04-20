@@ -1,0 +1,14 @@
+﻿{
+  "name": "sf-destructive-governance",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Enterprise Salesforce destructive deployment governance",
+  "scripts": {
+    "check:destructive": "node scripts/dependency-check/check-destructive-dependencies.js",
+    "parse:destructive": "node scripts/dependency-check/parse-destructive.js"
+  },
+  "dependencies": {
+    "@actions/core": "^1.11.1",
+    "xml2js": "^0.6.2"
+  }
+}
