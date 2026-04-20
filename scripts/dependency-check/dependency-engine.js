@@ -63,11 +63,14 @@ function buildBatchQuery(batch, includeIsDependency = true) {
     return `(MetadataComponentType = '${type}' AND MetadataComponentName = '${name}')`;
   });
 
+  const whereClause = includeIsDependency
+    ? `WHERE IsDependency = true AND (${clauses.join(' OR ')})`
+    : `WHERE (${clauses.join(' OR ')})`;
+
   const queryParts = [
     'SELECT MetadataComponentType, MetadataComponentName, RefMetadataComponentType, RefMetadataComponentName',
     'FROM MetadataComponentDependency',
-    includeIsDependency ? 'WHERE IsDependency = true' : 'WHERE 1 = 1',
-    `AND (${clauses.join(' OR ')})`,
+    whereClause,
     'ORDER BY RefMetadataComponentType, RefMetadataComponentName',
   ];
 
