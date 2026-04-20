@@ -26,7 +26,7 @@ function runSfQuery({ alias, query }) {
       { maxBuffer: 10 * 1024 * 1024 },
       (error, stdout, stderr) => {
         if (error) {
-          reject(new Error(`sf query failed: ${stderr || error.message}`));
+          reject(new Error(`sf query failed: ${stderr || stdout || error.message}`));
           return;
         }
         try {
@@ -56,20 +56,22 @@ async function runWithRetry(runFn, retries = MAX_RETRIES) {
   throw lastError;
 }
 
-function buildBatchQuery(batch) {
+function buildBatchQuery(batch, includeIsDependency = true) {
   const clauses = batch.map((component) => {
     const type = escapeSoql(component.type);
     const name = escapeSoql(component.name);
     return `(MetadataComponentType = '${type}' AND MetadataComponentName = '${name}')`;
   });
 
-  return [
+  const queryParts = [
     'SELECT MetadataComponentType, MetadataComponentName, RefMetadataComponentType, RefMetadataComponentName',
     'FROM MetadataComponentDependency',
-    'WHERE IsDependency = true',
+    includeIsDependency ? 'WHERE IsDependency = true' : 'WHERE 1 = 1',
     `AND (${clauses.join(' OR ')})`,
     'ORDER BY RefMetadataComponentType, RefMetadataComponentName',
-  ].join(' ');
+  ];
+
+  return queryParts.join(' ');
 }
 
 async function mapLimit(items, limit, iteratee) {
@@ -92,8 +94,17 @@ async function mapLimit(items, limit, iteratee) {
 async function queryDependencies({ alias, components, batchSize = DEFAULT_BATCH_SIZE, concurrency = DEFAULT_CONCURRENCY }) {
   const batches = chunkArray(components, batchSize);
   const batchResults = await mapLimit(batches, concurrency, async (batch) => {
-    const query = buildBatchQuery(batch);
-    return runWithRetry(() => runSfQuery({ alias, query }));
+    const query = buildBatchQuery(batch, true);
+    try {
+      return await runWithRetry(() => runSfQuery({ alias, query }));
+    } catch (error) {
+      // Some orgs/tooling API versions do not expose IsDependency. Retry without that column filter.
+      if (/IsDependency|No such column|MALFORMED_QUERY/i.test(error.message)) {
+        const fallbackQuery = buildBatchQuery(batch, false);
+        return runWithRetry(() => runSfQuery({ alias, query: fallbackQuery }));
+      }
+      throw error;
+    }
   });
 
   const flattened = batchResults.flat();

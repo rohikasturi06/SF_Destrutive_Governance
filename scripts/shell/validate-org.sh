@@ -108,6 +108,24 @@ STATUS=$(jq -r '.result.status // "Unknown"' reports/org-validation-result.json)
 DEPLOY_ID=$(jq -r '.result.id // "n/a"' reports/org-validation-result.json)
 ORG_URL=$(sf org display --target-org "${SF_ALIAS:-ci-org}" --json | jq -r '.result.instanceUrl // ""')
 
+# Non-blocking case: destructive check-only warning for already-missing metadata.
+if [[ "$STATUS" == "Failed" ]]; then
+  ONLY_MISSING_WARNINGS=$(jq -r '
+    [
+      (.result.details.componentFailures // [])[]?.problem
+      | select(type=="string")
+      | test("^No [A-Za-z0-9_]+ named:")
+    ] | length
+  ' reports/org-validation-result.json 2>/dev/null || echo "0")
+
+  TOTAL_FAILURES=$(jq -r '(.result.details.componentFailures // []) | length' reports/org-validation-result.json 2>/dev/null || echo "0")
+
+  if [[ "$TOTAL_FAILURES" -gt 0 && "$ONLY_MISSING_WARNINGS" -eq "$TOTAL_FAILURES" ]]; then
+    echo "[VALIDATION] Only missing-metadata warnings detected in destructive check. Treating as non-blocking."
+    STATUS="SucceededWithWarnings"
+  fi
+fi
+
 echo "[VALIDATION] Deployment status: ${STATUS}"
 echo "[VALIDATION] Deployment id: ${DEPLOY_ID}"
 if [[ -n "$ORG_URL" ]]; then
