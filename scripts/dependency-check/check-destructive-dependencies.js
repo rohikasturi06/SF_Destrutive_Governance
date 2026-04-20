@@ -68,6 +68,16 @@ function detectDestructiveFiles(changedFiles) {
   return changedFiles.filter((file) => /destructivechanges\.xml$/i.test(file));
 }
 
+function buildTypeSummary(components) {
+  const counts = {};
+  for (const component of components) {
+    counts[component.type] = (counts[component.type] || 0) + 1;
+  }
+  return Object.entries(counts)
+    .map(([type, count]) => ({ type, count }))
+    .sort((a, b) => b.count - a.count || a.type.localeCompare(b.type));
+}
+
 function ensureDirectory(dirPath) {
   fs.mkdirSync(dirPath, { recursive: true });
 }
@@ -252,6 +262,80 @@ function toMarkdown({ dependencies, overrideEnabled, parsedComponents, destructi
   return lines.join('\n');
 }
 
+function toExecutiveSummary({
+  changedFiles,
+  destructiveFiles,
+  components,
+  dependencies,
+  report,
+  metricsPath,
+  reportPath,
+  overrideEnabled,
+}) {
+  const typeSummary = buildTypeSummary(components);
+  const lines = [
+    '# Destructive Validation Executive Summary',
+    '',
+    `- Repository: ${process.env.GITHUB_REPOSITORY || 'local-run'}`,
+    `- Run ID: ${process.env.GITHUB_RUN_ID || 'local-run'}`,
+    `- PR Number: ${process.env.GITHUB_REF_NAME || 'n/a'}`,
+    `- Scanned At: ${report.scannedAt}`,
+    '',
+    '## Validations Executed',
+    '',
+    '- PR diff changed-file analysis',
+    '- Destructive manifest XML parsing',
+    '- MetadataComponentDependency dependency validation',
+    '- Blocking policy decision evaluation',
+    '',
+    '## Changed Files',
+    '',
+    '| File |',
+    '|---|',
+  ];
+
+  if (changedFiles.length === 0) {
+    lines.push('| No changed files detected |');
+  } else {
+    changedFiles.slice(0, 200).forEach((file) => lines.push(`| ${file} |`));
+    if (changedFiles.length > 200) {
+      lines.push(`| ... ${changedFiles.length - 200} more files |`);
+    }
+  }
+
+  lines.push('', '## Destructive Manifest Summary', '');
+  lines.push(`- Files detected: ${destructiveFiles.length}`);
+  if (destructiveFiles.length > 0) {
+    destructiveFiles.forEach((file) => lines.push(`- ${file}`));
+  }
+
+  lines.push('', `- Components parsed: ${components.length}`, '', '| Metadata Type | Members |', '|---|---:|');
+  if (typeSummary.length === 0) {
+    lines.push('| None | 0 |');
+  } else {
+    typeSummary.forEach((entry) => lines.push(`| ${entry.type} | ${entry.count} |`));
+  }
+
+  lines.push(
+    '',
+    '## Dependency Decision',
+    '',
+    `- Dependencies found: ${dependencies.length}`,
+    `- Override label enabled: ${overrideEnabled}`,
+    `- Merge blocked: ${dependencies.length > 0 && !overrideEnabled}`,
+    `- Cache hit: ${report.cacheHit}`,
+    '',
+    '## Report References',
+    '',
+    `- Machine report: \`${reportPath}\``,
+    `- Metrics report: \`${metricsPath}\``,
+    '- Artifact bundle: `destructive-dependency-report`',
+    ''
+  );
+
+  return lines.join('\n');
+}
+
 async function run() {
   const { changedFiles, outputJson, outputMd, metricsJson, cacheDir, auditDir } = parseArgs();
   const alias = process.env.SF_ALIAS || 'ci-org';
@@ -333,6 +417,19 @@ async function run() {
   fs.writeFileSync(outputJson, JSON.stringify(report, null, 2));
   fs.writeFileSync(metricsJson, JSON.stringify(metrics, null, 2));
   fs.writeFileSync(outputMd, toMarkdown({ dependencies, overrideEnabled, parsedComponents: uniqueComponents, destructiveFiles }));
+  fs.writeFileSync(
+    'destructive-executive-summary.md',
+    toExecutiveSummary({
+      changedFiles: changed,
+      destructiveFiles,
+      components: uniqueComponents,
+      dependencies,
+      report,
+      metricsPath: metricsJson,
+      reportPath: outputJson,
+      overrideEnabled,
+    })
+  );
   writeAuditBundle({
     auditDir,
     report,
@@ -354,6 +451,10 @@ run().catch((error) => {
   fs.writeFileSync(
     'dependency-report.md',
     ['## Salesforce Destructive Dependency Check', '', `:x: Workflow failed: ${error.message}`].join('\n')
+  );
+  fs.writeFileSync(
+    'destructive-executive-summary.md',
+    ['# Destructive Validation Executive Summary', '', `- Workflow failed: ${error.message}`].join('\n')
   );
   core.setFailed(error.message);
 });

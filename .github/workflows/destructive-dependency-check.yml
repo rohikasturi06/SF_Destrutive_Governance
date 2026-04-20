@@ -20,6 +20,7 @@ env:
   NODE_ENV: production
   SF_DISABLE_TELEMETRY: "true"
   SFDX_DISABLE_TELEMETRY: "true"
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   DEP_CACHE_DIR: .cache/dependency-check
   DEP_CACHE_VERSION: v1
   DEP_CACHE_MAX_FILES: "250"
@@ -128,14 +129,26 @@ jobs:
           path: |
             dependency-report.json
             dependency-report.md
+            destructive-executive-summary.md
             dependency-metrics.json
             audit-evidence/**
+
+      - name: Publish destructive executive summary
+        if: always()
+        run: |
+          if [ -f destructive-executive-summary.md ]; then
+            cat destructive-executive-summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "## Destructive Validation Executive Summary" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "- Executive summary file not generated." >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Post PR comment
         if: always()
         uses: actions/github-script@v7
         env:
-          REPORT_MD_PATH: dependency-report.md
+          REPORT_MD_PATH: destructive-executive-summary.md
         with:
           script: |
             const fs = require('fs');
