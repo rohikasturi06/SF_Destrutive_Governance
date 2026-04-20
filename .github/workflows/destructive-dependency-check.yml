@@ -67,7 +67,7 @@ jobs:
           echo "Destructive fingerprint: $FINGERPRINT"
 
       - name: Install Node dependencies
-        run: npm ci
+        run: npm install --no-audit --no-fund
 
       - name: Restore dependency analysis cache
         uses: actions/cache@v4

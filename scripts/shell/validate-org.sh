@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env bash
+#!/usr/bin/env bash
 set -euo pipefail
 
 mkdir -p reports
@@ -65,7 +65,7 @@ summarize_manifest() {
   echo ""
   echo "- Salesforce authentication/session verification"
   echo "- SGD delta generation from git diff"
-  echo "- Manifest inspection (`package.xml` + `destructiveChanges.xml`)"
+  echo "- Manifest inspection (package.xml + destructiveChanges.xml)"
   echo "- Check-only deployment validation against target org"
   echo ""
 } >> reports/executive-summary.md
