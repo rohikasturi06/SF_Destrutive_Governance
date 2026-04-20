@@ -1,0 +1,12 @@
+﻿{
+  "orgName": "Enterprise Salesforce Dev Sandbox",
+  "edition": "Enterprise",
+  "features": ["API", "DebugApex", "RecordTypes"],
+  "settings": {
+    "securitySettings": {
+      "sessionSettings": {
+        "sessionTimeout": "TwelveHours"
+      }
+    }
+  }
+}

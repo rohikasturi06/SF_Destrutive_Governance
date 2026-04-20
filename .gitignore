@@ -1,0 +1,20 @@
+﻿# Ignore OS and tooling artifacts
+.DS_Store
+Thumbs.db
+
+# Node / JS artifacts
+node_modules/
+coverage/
+dist/
+
+# Salesforce temporary artifacts
+.sfdx/
+.localdevserver/
+
+# Logs and temp
+*.log
+*.tmp
+
+# IDE
+.vscode/
+.idea/
