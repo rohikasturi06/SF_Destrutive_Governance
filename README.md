@@ -40,3 +40,21 @@ Prerequisite: Node.js LTS + npm installed.
 npm install
 node scripts/dependency-check/check-destructive-dependencies.js --changed-files changed-files.txt
 ```
+
+## Org Validation Pipeline
+
+- Workflow: `.github/workflows/salesforce-org-validation.yml`
+- Auth: uses `SF_AUTH_URL` repository secret
+- Mode: check-only deploy (`--dry-run`) against your org
+- Source: `src/salesforce/force-app`
+- Artifacts: `reports/org-validation-result.json`
+
+### Dummy metadata included for validation
+
+- Field: `Account.Dummy_Validation_Field__c`
+- Access assignment: `permissionsets/Dummy_Validation.permissionset-meta.xml`
+
+### Trigger validation now
+
+- Open PR from `dev` to `main` with these metadata files, or
+- Run workflow manually from GitHub Actions (`workflow_dispatch`).
