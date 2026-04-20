@@ -18,6 +18,8 @@ concurrency:
 env:
   SF_ALIAS: ci-org
   NODE_ENV: production
+  SF_DISABLE_TELEMETRY: "true"
+  SFDX_DISABLE_TELEMETRY: "true"
   DEP_CACHE_DIR: .cache/dependency-check
   DEP_CACHE_VERSION: v1
   DEP_CACHE_MAX_FILES: "250"

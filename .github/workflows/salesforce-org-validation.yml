@@ -19,6 +19,9 @@ concurrency:
 
 env:
   SF_ALIAS: ci-org
+  SF_DISABLE_TELEMETRY: "true"
+  SFDX_DISABLE_TELEMETRY: "true"
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
   validate-org:
@@ -55,10 +58,11 @@ jobs:
           printf "%s" "$SF_AUTH_URL" > sfdx_auth_url.txt
           chmod 600 sfdx_auth_url.txt
 
-      - name: Authenticate and display org
+      - name: Authenticate (sanitized logs)
         run: |
-          sf org login sfdx-url --sfdx-url-file sfdx_auth_url.txt --alias "$SF_ALIAS" --set-default --json
-          sf org display --target-org "$SF_ALIAS" --verbose --json
+          sf org login sfdx-url --sfdx-url-file sfdx_auth_url.txt --alias "$SF_ALIAS" --set-default >/dev/null 2>&1
+          sf org display --target-org "$SF_ALIAS" >/dev/null 2>&1
+          echo "Salesforce org authentication succeeded for alias: $SF_ALIAS"
 
       - name: Validate deploy (check-only)
         run: bash scripts/shell/validate-org.sh
@@ -73,6 +77,27 @@ jobs:
             echo "" >> "$GITHUB_STEP_SUMMARY"
             echo "- No executive summary generated." >> "$GITHUB_STEP_SUMMARY"
           fi
+
+      - name: Post executive summary to PR
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        env:
+          SUMMARY_PATH: reports/executive-summary.md
+        with:
+          script: |
+            const fs = require('fs');
+            const summaryPath = process.env.SUMMARY_PATH;
+            let body = "## Validation Executive Summary\n\nNo summary file generated.";
+            if (fs.existsSync(summaryPath)) {
+              body = fs.readFileSync(summaryPath, 'utf8');
+            }
+            body = `${body}\n\n_Run: ${context.runId}_`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              body
+            });
 
       - name: Upload validation artifacts
         if: always()

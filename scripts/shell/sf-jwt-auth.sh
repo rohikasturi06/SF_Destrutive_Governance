@@ -13,11 +13,10 @@ until [[ $attempt -gt $max_attempts ]]; do
   if sf org login sfdx-url \
       --sfdx-url-file sfdx_auth_url.txt \
       --alias "$SF_ALIAS" \
-      --set-default \
-      --json; then
+      --set-default >/dev/null 2>&1; then
     echo "[AUTH] Salesforce authentication successful."
-    echo "[AUTH] Verifying org with sf org display..."
-    sf org display --target-org "$SF_ALIAS" --verbose --json
+    sf org display --target-org "$SF_ALIAS" >/dev/null 2>&1
+    echo "[AUTH] Org session verification successful."
     exit 0
   fi
 

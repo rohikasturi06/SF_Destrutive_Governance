@@ -1,0 +1,94 @@
+name: Salesforce Deploy Main
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/salesforce/**"
+      - ".github/workflows/salesforce-deploy-main.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  SF_ALIAS: deploy-org
+  SF_DISABLE_TELEMETRY: "true"
+  SFDX_DISABLE_TELEMETRY: "true"
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  deploy-main:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: production
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Salesforce CLI
+        run: npm install --global @salesforce/cli
+
+      - name: Install jq
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y jq
+
+      - name: Authenticate deploy org
+        env:
+          SF_AUTH_URL_PROD: ${{ secrets.SF_AUTH_URL_PROD }}
+          SF_AUTH_URL: ${{ secrets.SF_AUTH_URL }}
+        run: |
+          AUTH_URL="${SF_AUTH_URL_PROD:-$SF_AUTH_URL}"
+          if [ -z "$AUTH_URL" ]; then
+            echo "Neither SF_AUTH_URL_PROD nor SF_AUTH_URL is configured."
+            exit 1
+          fi
+          printf "%s" "$AUTH_URL" > sfdx_auth_url.txt
+          chmod 600 sfdx_auth_url.txt
+          sf org login sfdx-url --sfdx-url-file sfdx_auth_url.txt --alias "$SF_ALIAS" --set-default >/dev/null 2>&1
+          sf org display --target-org "$SF_ALIAS" >/dev/null 2>&1
+          echo "Authenticated deploy org alias: $SF_ALIAS"
+
+      - name: Deploy to org (actual deploy)
+        run: |
+          mkdir -p reports
+          sf project deploy start \
+            --source-dir src/salesforce/force-app \
+            --target-org "$SF_ALIAS" \
+            --test-level RunLocalTests \
+            --wait 60 \
+            --verbose \
+            --json | tee reports/deploy-main-result.json
+
+          STATUS=$(jq -r '.result.status // "Unknown"' reports/deploy-main-result.json)
+          DEPLOY_ID=$(jq -r '.result.id // "n/a"' reports/deploy-main-result.json)
+
+          {
+            echo "## Main Deployment Summary"
+            echo ""
+            echo "- Status: ${STATUS}"
+            echo "- Deployment ID: ${DEPLOY_ID}"
+            echo "- Branch: ${GITHUB_REF_NAME}"
+            echo "- Commit: ${GITHUB_SHA}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [[ "$STATUS" != "Succeeded" && "$STATUS" != "SucceededPartial" ]]; then
+            echo "Deployment failed."
+            exit 1
+          fi
+
+      - name: Upload deployment artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deploy-main-${{ github.run_id }}
+          path: reports/
