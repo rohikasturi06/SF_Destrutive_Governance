@@ -19,6 +19,12 @@
 
 set -euo pipefail
 
+# Load shared deployment helpers (destructive detection, deploy args, summary).
+# shellcheck source=./_deployment_lib.sh
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/_deployment_lib.sh"
+
 echo ""
 echo "🚀 STAGE 3: DELTA PACKAGE GENERATION"
 echo "======================================"
@@ -131,101 +137,126 @@ print(count)
 PY
 )
 
-  if [ "${PACKAGE_MEMBERS:-0}" -gt 0 ]; then
+  # ----------------------------------------------------------------------------
+  # Destructive change detection (single source of truth: _deployment_lib.sh)
+  # ----------------------------------------------------------------------------
+  detect_destructive_changes
+  print_destructive_preview
+
+  if [ "${PACKAGE_MEMBERS:-0}" -gt 0 ] || [ "${HAS_DESTRUCTIVE_CHANGES:-false}" = "true" ]; then
     echo ""
     echo "📦 Package.xml Preview (first 20 lines):"
-    sed -n '1,20p' delta/package/package.xml
+    sed -n '1,20p' delta/package/package.xml || true
 
-    echo ""
-    echo "🔍 Destructive Changes Analysis:"
-    DESTRUCTIVE_FILE=$(find delta -name "destructiveChanges*.xml" 2>/dev/null | head -1)
-    
-    if [ -n "$DESTRUCTIVE_FILE" ]; then
-      # Check if destructive changes XML contains actual members (not just empty structure)
-      if grep -q "<members>" "$DESTRUCTIVE_FILE" 2>/dev/null; then
-        echo "  Found: $DESTRUCTIVE_FILE"
-        cat "$DESTRUCTIVE_FILE"
-        echo "  ⚠️  Destructive changes detected - components will be deleted"
-      else
-        echo "  ✅ No destructive changes (empty destructiveChanges.xml)"
-      fi
-    else
-      echo "  ✅ No destructive changes found"
+    # Component-type detection feeds downstream gates (Code Analyzer, etc.)
+    HAS_APEX="false"
+    HAS_LWC="false"
+    HAS_VLOCITY="false"
+
+    if grep -q "<name>ApexClass</name>" delta/package/package.xml 2>/dev/null || \
+       grep -q "<name>ApexTrigger</name>" delta/package/package.xml 2>/dev/null; then
+      HAS_APEX="true"
     fi
 
-        # Set deployment flag for downstream scripts
-        echo "HAS_DEPLOYMENT_PACKAGE=true" >> "$GITHUB_ENV"
-        
-        # Detect component types for GitHub Actions
-        HAS_APEX="false"
-        HAS_LWC="false"
-        HAS_VLOCITY="false"
-        
-        if grep -q "<name>ApexClass</name>" delta/package/package.xml 2>/dev/null || \
-           grep -q "<name>ApexTrigger</name>" delta/package/package.xml 2>/dev/null; then
-          HAS_APEX="true"
-        fi
-        
-        if grep -q "<name>LightningComponentBundle</name>" delta/package/package.xml 2>/dev/null; then
-          HAS_LWC="true"
-        fi
-        
-        # Check for Vlocity components in delta package
-        if find delta/force-app -name "*.rpt-meta.xml" -o -name "*.oip-meta.xml" -o -name "*.omniscript-meta.xml" 2>/dev/null | grep -q .; then
-          HAS_VLOCITY="true"
-        fi
-        
-        # Set component detection flags for GitHub Actions
-        echo "has-deployment-package=true" >> "$GITHUB_OUTPUT"
-        echo "has-apex=$HAS_APEX" >> "$GITHUB_OUTPUT"
-        echo "has-lwc=$HAS_LWC" >> "$GITHUB_OUTPUT"
-        echo "has-vlocity=$HAS_VLOCITY" >> "$GITHUB_OUTPUT"
+    if grep -q "<name>LightningComponentBundle</name>" delta/package/package.xml 2>/dev/null; then
+      HAS_LWC="true"
+    fi
 
+    if find delta/force-app -name "*.rpt-meta.xml" -o -name "*.oip-meta.xml" -o -name "*.omniscript-meta.xml" 2>/dev/null | grep -q .; then
+      HAS_VLOCITY="true"
+    fi
+
+    # Reasoning for HAS_DEPLOYMENT_PACKAGE:
+    #   Either source metadata is present OR destructive changes have members.
+    #   This ensures pure-deletion PRs (no force-app changes) still trigger
+    #   downstream validate/deploy stages.
+    {
+      echo "HAS_DEPLOYMENT_PACKAGE=true"
+    } >> "$GITHUB_ENV"
+
+    {
+      echo "has-deployment-package=true"
+      echo "has-apex=$HAS_APEX"
+      echo "has-lwc=$HAS_LWC"
+      echo "has-vlocity=$HAS_VLOCITY"
+    } >> "$GITHUB_OUTPUT"
+
+    # Persist destructive-change state for downstream steps.
+    emit_github_env_outputs
+
+    if [ "${PACKAGE_MEMBERS:-0}" -eq 0 ] && [ "${HAS_DESTRUCTIVE_CHANGES:-false}" = "true" ]; then
+      echo ""
+      echo "ℹ️  Destructive-only delta detected — pipeline will run as a"
+      echo "   deletion-focused deployment (no source-dir, manifest-driven)."
+    fi
   else
     echo ""
     echo "📋 Empty Package.xml Found:"
     echo "  • Package.xml exists but contains no metadata components"
+    echo "  • No destructive changes detected"
     echo "  • This indicates only script/YAML changes (no deployment needed)"
-    echo "  • Pipeline will skip deployment validation stages"
     echo ""
     echo "📄 Package.xml Contents:"
     cat delta/package/package.xml
     echo ""
-    
-    # List modified files that triggered this run
+
     echo "📝 Files Modified in This Change:"
     git diff --name-only "origin/$TARGET_BRANCH" HEAD | head -20 || echo "  (unable to determine changed files)"
 
-    # Set deployment flag for downstream scripts
-    echo "HAS_DEPLOYMENT_PACKAGE=false" >> "$GITHUB_ENV"
-    
-    # Set component detection flags for GitHub Actions
-    echo "has-deployment-package=false" >> "$GITHUB_OUTPUT"
-    echo "has-apex=false" >> "$GITHUB_OUTPUT"
-    echo "has-lwc=false" >> "$GITHUB_OUTPUT"
-    echo "has-vlocity=false" >> "$GITHUB_OUTPUT"
+    {
+      echo "HAS_DEPLOYMENT_PACKAGE=false"
+    } >> "$GITHUB_ENV"
+
+    {
+      echo "has-deployment-package=false"
+      echo "has-apex=false"
+      echo "has-lwc=false"
+      echo "has-vlocity=false"
+    } >> "$GITHUB_OUTPUT"
+
+    emit_github_env_outputs
   fi
 
 else
-  echo ""
-  echo "📋 No Package.xml Found:"
-  echo "  • No deployment package generated"
-  echo "  • This indicates only script/YAML changes or no changes to deploy"
-  echo "  • Pipeline will skip deployment validation stages"
-  echo ""
-  
-  # List modified files that triggered this run
-  echo "📝 Files Modified in This Change:"
-  git diff --name-only "origin/$TARGET_BRANCH" HEAD | head -20 || echo "  (unable to determine changed files)"
+  # No package.xml at all — still check for destructive changes (sgd quirk).
+  detect_destructive_changes
+  print_destructive_preview
 
-  # Set deployment flag for downstream scripts
-  echo "HAS_DEPLOYMENT_PACKAGE=false" >> "$GITHUB_ENV"
-  
-  # Set component detection flags for GitHub Actions
-  echo "has-deployment-package=false" >> "$GITHUB_OUTPUT"
-  echo "has-apex=false" >> "$GITHUB_OUTPUT"
-  echo "has-lwc=false" >> "$GITHUB_OUTPUT"
-  echo "has-vlocity=false" >> "$GITHUB_OUTPUT"
+  if [ "${HAS_DESTRUCTIVE_CHANGES:-false}" = "true" ]; then
+    echo ""
+    echo "ℹ️  No package.xml but destructive changes present — destructive-only run."
+    {
+      echo "HAS_DEPLOYMENT_PACKAGE=true"
+    } >> "$GITHUB_ENV"
+    {
+      echo "has-deployment-package=true"
+      echo "has-apex=false"
+      echo "has-lwc=false"
+      echo "has-vlocity=false"
+    } >> "$GITHUB_OUTPUT"
+  else
+    echo ""
+    echo "📋 No Package.xml Found:"
+    echo "  • No deployment package generated"
+    echo "  • No destructive changes detected"
+    echo "  • This indicates only script/YAML changes or no changes to deploy"
+    echo ""
+
+    echo "📝 Files Modified in This Change:"
+    git diff --name-only "origin/$TARGET_BRANCH" HEAD | head -20 || echo "  (unable to determine changed files)"
+
+    {
+      echo "HAS_DEPLOYMENT_PACKAGE=false"
+    } >> "$GITHUB_ENV"
+    {
+      echo "has-deployment-package=false"
+      echo "has-apex=false"
+      echo "has-lwc=false"
+      echo "has-vlocity=false"
+    } >> "$GITHUB_OUTPUT"
+  fi
+
+  emit_github_env_outputs
 fi
 
 echo ""

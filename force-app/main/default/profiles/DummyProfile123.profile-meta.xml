@@ -10,11 +10,6 @@
         <field>Dummy_Profile_Test__c.Dummy_Number__c</field>
         <readable>true</readable>
     </fieldPermissions>
-    <fieldPermissions>
-        <editable>true</editable>
-        <field>Dummy_Profile_Test__c.Dummy_Text__c</field>
-        <readable>true</readable>
-    </fieldPermissions>
     <objectPermissions>
         <allowCreate>true</allowCreate>
         <allowDelete>true</allowDelete>
