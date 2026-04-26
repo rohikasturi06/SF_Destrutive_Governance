@@ -595,6 +595,10 @@ jobs:
         uses: marocchino/sticky-pull-request-comment@v2
         with:
           header: deployment-summary-${{ env.TARGET_ENV }}
+          # Delete the previous summary and post a fresh comment at the bottom
+          # of the PR thread so reviewers get a real notification instead of a
+          # silent "(edited)" tag on the same comment.
+          recreate: true
           path: reports/executive-summary.md
 
       - name: Send PR Validation Summary Email
