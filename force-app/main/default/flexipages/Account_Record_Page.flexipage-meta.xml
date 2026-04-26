@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FlexiPage xmlns="http://soap.sforce.com/2006/04/metadata">
+    <flexiPageRegions>
+        <itemInstances>
+            <componentInstance>
+                <componentInstanceProperties>
+                    <name>flowName</name>
+                    <value>Account_Quick_Action</value>
+                </componentInstanceProperties>
+                <componentName>force:flow</componentName>
+            </componentInstance>
+        </itemInstances>
+        <name>sidebar</name>
+        <type>Region</type>
+    </flexiPageRegions>
+    <masterLabel>Account Record Page</masterLabel>
+    <sobjectType>Account</sobjectType>
+    <type>RecordPage</type>
+</FlexiPage>
