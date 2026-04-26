@@ -34,6 +34,18 @@ mkdir -p reports
 echo '{"result":{"status":"Failed","message":"No deploy run performed"}}' > reports/deploy-report.json
 echo "" > reports/validation-summary.txt
 
+# Single source of truth for downstream steps. We default to "failure" so that
+# any unexpected `set -e` exit, killed subshell, or early crash is faithfully
+# reported instead of triggering a confusing "validation_result.txt missing"
+# fallback in the workflow YAML. Each clean exit path below overrides this.
+echo "failure" > validation_result.txt
+record_result() {
+  case "${1:-failure}" in
+    success) echo "success" > validation_result.txt ;;
+    *)       echo "failure" > validation_result.txt ;;
+  esac
+}
+
 summary() {
   echo "$1" | tee -a reports/validation-summary.txt
 }
@@ -276,8 +288,12 @@ echo ""
 echo "🔍 Code Quality Analysis:"
 echo "  • Total Code Violations: $TOTAL_VIOLATIONS (Apex: $APEX_VIOLATIONS, LWC: $LWC_VIOLATIONS)"
 
-# Vlocity summary
-VLOCITY_COMPONENTS=$(find delta/force-app -name "*.rpt-meta.xml" -o -name "*.oip-meta.xml" -o -name "*.omniscript-meta.xml" 2>/dev/null | wc -l | tr -d ' ')
+# Vlocity summary — gate on directory existence to keep `set -euo pipefail`
+# happy when the delta workspace is empty (no deploy run).
+VLOCITY_COMPONENTS=0
+if [ -d delta/force-app ]; then
+  VLOCITY_COMPONENTS=$(find delta/force-app \( -name '*.rpt-meta.xml' -o -name '*.oip-meta.xml' -o -name '*.omniscript-meta.xml' \) 2>/dev/null | wc -l | tr -d ' ')
+fi
 if [ "$VLOCITY_COMPONENTS" -gt 0 ]; then
   echo ""
   echo "🧩 Vlocity Components Detected:"
@@ -339,52 +355,38 @@ fi
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "🔍 QUALITY GATE VALIDATION"
+echo "🔍 QUALITY GATE VERDICT"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-# Quality gate evaluation
+# One verdict, one line of action. Detailed metrics already printed above.
 if [ "$STATUS" = "Succeeded" ]; then
-  echo "✅ Validation: PASSED"
-  echo "✅ All quality gates met"
-  echo ""
-  echo "🎉 DEPLOYMENT READY"
+  echo "✅ PASSED — deployment validated successfully."
+  record_result success
   exit 0
 
 elif [ "$STATUS" = "Skipped" ] && [ "${COMPONENT_FAIL_COUNT}" -eq 0 ] && [ "${TEST_FAIL_COUNT}" -eq 0 ]; then
-  echo "✅ Validation: SKIPPED (no changes)"
-  echo "✅ All quality gates met"
-  echo ""
-  echo "🎉 PIPELINE SUCCESSFUL"
+  echo "✅ PASSED — no Salesforce changes to validate."
+  record_result success
   exit 0
 
 elif [ "${COMPONENT_FAIL_COUNT}" -gt 0 ] || [ "${TEST_FAIL_COUNT}" -gt 0 ]; then
-  echo "❌ Validation: FAILED"
-  echo "   • Component Failures: ${COMPONENT_FAIL_COUNT}"
-  echo "   • Test Failures: ${TEST_FAIL_COUNT}"
-  echo ""
-  echo "💥 QUALITY GATES FAILED - Fix issues before deploying"
+  echo "❌ FAILED — ${COMPONENT_FAIL_COUNT} component error(s), ${TEST_FAIL_COUNT} test failure(s)."
+  echo "👉 ACTION: fix the issues listed under '⚠️  ISSUES DETECTED' above, commit, re-push."
+  record_result failure
   exit 1
 
-elif [ "$STATUS" != "Succeeded" ] && [ "$COVERAGE" -lt "${COVERAGE_THRESHOLD:-75}" ] && [ "$STATUS" != "Skipped" ] && [ "${NON_APEX_DEPLOYMENT:-false}" != "true" ]; then
-  echo "❌ Validation: FAILED"
-  echo "   • Status: ${STATUS}"
-  echo "   • Coverage: ${COVERAGE}% (required: ${COVERAGE_THRESHOLD:-75}%)"
-  echo "   • Component Failures: ${COMPONENT_FAIL_COUNT}"
-  echo "   • Test Failures: ${TEST_FAIL_COUNT}"
-  echo ""
-  echo "💥 QUALITY GATES FAILED - Increase test coverage"
+elif [ "$STATUS" != "Succeeded" ] \
+     && [ "$STATUS" != "Skipped" ] \
+     && [ "${NON_APEX_DEPLOYMENT:-false}" != "true" ] \
+     && [ "$COVERAGE" -lt "${COVERAGE_THRESHOLD:-75}" ]; then
+  echo "❌ FAILED — code coverage ${COVERAGE}% is below the ${COVERAGE_THRESHOLD:-75}% threshold."
+  echo "👉 ACTION: add or fix Apex tests for the changed classes."
+  record_result failure
   exit 1
 
-elif [ "$STATUS" = "Failed" ]; then
-  echo "❌ Validation: FAILED"
-  echo "   • Status: ${STATUS}"
-  echo "   • Component Failures: ${COMPONENT_FAIL_COUNT}"
-  echo "   • Test Failures: ${TEST_FAIL_COUNT}"
-  exit 1
 else
-  echo "✅ Validation: PASSED"
-  echo "✅ All quality gates met"
-  echo ""
-  echo "🎉 DEPLOYMENT READY"
-  exit 0
+  echo "❌ FAILED — deployment validation status: ${STATUS}."
+  echo "👉 ACTION: review the error block above (or open the deploy report link if printed)."
+  record_result failure
+  exit 1
 fi

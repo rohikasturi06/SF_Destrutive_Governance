@@ -346,30 +346,11 @@ jobs:
         env:
           TARGET_BRANCH: ${{ github.event.pull_request.base.ref || github.base_ref || github.ref_name }}
         run: |
-          set -e
-          echo "🚀 Running Dev Environment Quality Gates Validation"
-          
+          # The script owns validation_result.txt — no double-bookkeeping here.
           if [ "$HAS_DEPLOYMENT_PACKAGE" = "true" ]; then
-            echo "📦 Salesforce components detected - running full validation..."
-            if ./scripts/validate_deployment.sh; then
-              echo "✅ Dev Quality Gates passed successfully"
-              echo "success" > validation_result.txt
-            else
-              echo "❌ Dev Quality Gates failed"
-              echo "failure" > validation_result.txt
-            fi
+            ./scripts/validate_deployment.sh
           else
-            echo "✅ No deployable components detected - script/YAML changes only"
-            echo "✅ Dev Quality Gates passed (no Salesforce components to validate)"
-            echo ""
-            echo "📋 VALIDATION SUMMARY:"
-            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            echo "   • Salesforce Components: None detected"
-            echo "   • Vlocity Components: None detected"
-            echo "   • Script/YAML Changes: Detected and validated"
-            echo "   • Quality Gates Status: ✅ PASSED"
-            echo "   • Validation Result: No deployment required"
-            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "✅ No Salesforce metadata changes — quality gates trivially pass."
             echo "success" > validation_result.txt
           fi
 
@@ -382,55 +363,33 @@ jobs:
         id: set-quality-gates
         if: always()
         run: |
-          if [ ! -f "validation_result.txt" ]; then
-            echo "❌ No validation result found - defaulting to failure"
-            echo "failure" > validation_result.txt
-          fi
-          QUALITY=$(cat validation_result.txt)
-          echo "🔍 Final Dev Quality Gate Result: $QUALITY"
-          echo "quality_gates=$QUALITY" >> $GITHUB_OUTPUT
-          if [ "$QUALITY" = "success" ]; then
-            echo "✅ Dev quality gates passed - job will succeed"
-            exit 0
-          else
-            echo ""
-            echo "═══════════════════════════════════════════════════════"
-            echo "❌ DEV QUALITY GATES FAILED - DETAILED ERROR SUMMARY"
-            echo "═══════════════════════════════════════════════════════"
-            
-            if [ -f "reports/deploy-report.json" ]; then
-              echo ""
-              echo "🔍 DEV DEPLOYMENT VALIDATION ERRORS:"
-              echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-              if jq -e '.result.details.componentFailures' reports/deploy-report.json >/dev/null 2>&1; then
-                echo ""
-                echo "🔧 Component Failures:"
-                jq -r '.result.details.componentFailures[]? | "  ❌ " + (.fileName // .fullName) + ": " + (.problem // "Unknown error")' reports/deploy-report.json | head -10
-              fi
-              if jq -e '.result.details.runTestResult.failures' reports/deploy-report.json >/dev/null 2>&1; then
-                echo ""
-                echo "🧪 Test Failures:"
-                jq -r '.result.details.runTestResult.failures[]? | "  ❌ " + (.name // "Unknown") + "." + (.methodName // "unknown") + ": " + (.message // "No message")' reports/deploy-report.json | head -10
-              fi
-              STATUS=$(jq -r '.result.status // "Unknown"' reports/deploy-report.json 2>/dev/null || echo "Unknown")
-              echo ""
-              echo "📊 Dev Deployment Status: $STATUS"
-            fi
-            if [ -f "reports/validation-summary.txt" ]; then
-              echo ""
-              echo "📋 DEV VALIDATION SUMMARY:"
-              echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-              cat reports/validation-summary.txt | tail -20
-            fi
-            echo ""
-            echo "🔧 ACTION REQUIRED:"
-            echo "  1. Review the errors above"
-            echo "  2. Fix the component/test failures"
-            echo "  3. Re-run this workflow"
-            echo ""
-            echo "❌ Dev quality gates failed - PR merge blocked"
-            exit 1
-          fi
+          # Trust the result file written by validate_deployment.sh / scan_dependencies.sh.
+          # Detailed errors were already printed in the previous step's logs and are
+          # rendered in the executive summary on the PR — we deliberately do not
+          # re-dump them here.
+          QUALITY="$(cat validation_result.txt 2>/dev/null || echo missing)"
+          echo "quality_gates=$QUALITY" >> "$GITHUB_OUTPUT"
+
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "🚦 DEV QUALITY GATE — FINAL VERDICT"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          case "$QUALITY" in
+            success)
+              echo "✅ PASSED — PR is safe to review and merge."
+              exit 0
+              ;;
+            failure)
+              echo "❌ FAILED — see the previous step's logs for the exact errors."
+              echo "💬 The same details are posted as a sticky 'Executive Summary' comment on this PR."
+              exit 1
+              ;;
+            *)
+              echo "❌ FAILED — validation step did not record a result (validation_result.txt missing/invalid)."
+              echo "   Inspect the previous step output for diagnostics."
+              exit 1
+              ;;
+          esac
 
       - name: Upload dev validation reports
         if: always()

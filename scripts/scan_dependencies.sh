@@ -232,15 +232,27 @@ with open(report_path, "w", encoding="utf-8") as out:
     )
 
 print("", flush=True)
-print("💥 QUALITY GATE FAILED — orphaned references detected:", flush=True)
+print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", flush=True)
+print("💥 DEPLOYMENT BLOCKED — Orphaned references detected", flush=True)
+print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", flush=True)
 for member_key, files in errors.items():
     total_lines = sum(len(v) for v in files.values())
+    print("", flush=True)
     print(
-        f"   • {member_key}: {total_lines} line(s) across {len(files)} file(s)",
+        f"❌ {member_key}  →  {total_lines} reference(s) in {len(files)} file(s)",
         flush=True,
     )
+    for fp, hits in files.items():
+        for lineno, content in hits:
+            snippet = content.strip()
+            if len(snippet) > 110:
+                snippet = snippet[:107] + "…"
+            print(f"      ↳ {fp}:{lineno}  |  {snippet}", flush=True)
 print("", flush=True)
-print(f"📄 Detailed report: {report_path}", flush=True)
+print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", flush=True)
+print("👉 ACTION: remove the references above, commit, and re-push.", flush=True)
+print(f"📄 Same report posted to PR comment + saved at {report_path}", flush=True)
+print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", flush=True)
 sys.exit(1)
 PY
 EXIT_CODE=$?
