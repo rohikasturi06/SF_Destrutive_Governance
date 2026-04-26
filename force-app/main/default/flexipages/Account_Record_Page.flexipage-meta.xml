@@ -4,13 +4,14 @@
         <itemInstances>
             <componentInstance>
                 <componentInstanceProperties>
-                    <name>flowName</name>
-                    <value>Account_Quick_Action</value>
+                    <name>richTextValue</name>
+                    <value>&lt;p&gt;Embedded flow reference: Account_Quick_Action&lt;/p&gt;</value>
                 </componentInstanceProperties>
-                <componentName>force:flow</componentName>
+                <componentName>flexipage:richText</componentName>
+                <identifier>richText_AccountQuickAction</identifier>
             </componentInstance>
         </itemInstances>
-        <name>sidebar</name>
+        <name>main</name>
         <type>Region</type>
     </flexiPageRegions>
     <masterLabel>Account Record Page</masterLabel>
