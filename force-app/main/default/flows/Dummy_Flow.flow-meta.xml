@@ -9,7 +9,7 @@
     <variables>
         <name>varText</name>
         <dataType>String</dataType>
-        <isCollection>true</isCollection>
+        <isCollection>false</isCollection>
         <isInput>true</isInput>
         <isOutput>false</isOutput>
     </variables>
