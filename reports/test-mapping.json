@@ -1,0 +1,11 @@
+{
+  "classes": [
+  "HelloWorld"
+],
+  "tests": [
+  "HelloWorldTest"
+],
+  "mapped_tests": [
+  "HelloWorldTest"
+]
+}

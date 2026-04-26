@@ -1,0 +1,11 @@
+
+📦 Deployable metadata detected
+🧪 Apex components detected - running tests
+🎯 Test Strategy: RunSpecifiedTests
+   Tests: HelloWorldTest
+🔄 Running validation...
+⚠️  Validation failed with mapped tests - trying fallback
+📊 Coverage: 0%
+⚠️  Fallback required (coverage < 75% or validation failed)
+🔄 Test Strategy: RunLocalTests (all org tests)
+❌ Fallback validation failed

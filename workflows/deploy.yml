@@ -1,0 +1,544 @@
+name: Salesforce Post-Merge Deployment Pipeline
+
+on:
+  push:
+    branches:
+      - dev
+      - qa
+      - intuat
+
+permissions:
+  contents: write
+  actions: read
+
+env:
+  SEVERITY_THRESHOLD: 3  # High/Critical violations only
+  COVERAGE_THRESHOLD: 75 # Minimum code coverage percentage required
+
+concurrency:
+  group: post-merge-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Post-merge Deploy to Org
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && (contains('refs/heads/dev', github.ref) || contains('refs/heads/qa', github.ref) || contains('refs/heads/intuat', github.ref))
+    steps:
+      - name: Set Environment
+        id: set-env
+        run: |
+          if [[ "${{ github.ref }}" == "refs/heads/dev" ]]; then
+            echo "environment=dev" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.ref }}" == "refs/heads/qa" ]]; then
+            echo "environment=qa" >> $GITHUB_OUTPUT
+          else
+            echo "environment=intuat" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '11'
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Optimize Salesforce CLI Performance
+        uses: actions/cache@v4
+        with:
+          path: ~/.sf
+          key: sf-cli-${{ runner.os }}-${{ hashFiles('**/sfdx-project.json') }}
+          restore-keys: |
+            sf-cli-${{ runner.os }}-
+
+      - name: Install SF CLI + sgd
+        run: |
+          npm install -g @salesforce/cli --silent
+          echo y | sf plugins install sfdx-git-delta
+
+      - name: Install jq for JSON parsing
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y jq
+
+      - name: Select org for push → dev
+        if: startsWith(github.ref, 'refs/heads/dev')
+        run: |
+          echo "SF_AUTH_URL=${{ secrets.DEV_SF_AUTH_URL }}" >> $GITHUB_ENV
+          echo "ORG_NAME=dev" >> $GITHUB_ENV
+
+      - name: Select org for push → qa
+        if: startsWith(github.ref, 'refs/heads/qa')
+        run: |
+          echo "SF_AUTH_URL=${{ secrets.QA_SF_AUTH_URL }}" >> $GITHUB_ENV
+          echo "ORG_NAME=qa" >> $GITHUB_ENV
+
+      - name: Select org for push → intuat
+        if: startsWith(github.ref, 'refs/heads/intuat')
+        run: |
+          echo "SF_AUTH_URL=${{ secrets.INTUAT_SF_AUTH_URL }}" >> $GITHUB_ENV
+          echo "ORG_NAME=intuat" >> $GITHUB_ENV
+
+      - name: Determine delta baseline (last successful run)
+        id: determine-baseline
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          # Ensure variables exist so 'set -u' won't cause an unbound-var error:
+          GITHUB_TOKEN="${GITHUB_TOKEN:-}"
+
+          # Derive environment tag name (deploy-dev|qa|intuat)
+          if [ -z "${ORG_NAME:-}" ]; then
+            echo "::error::ORG_NAME not set" >&2
+            exit 1
+          fi
+          
+          # Set both shell variable and GitHub environment for downstream steps
+          DEPLOY_TAG="deploy-${ORG_NAME}"
+          echo "DEPLOY_TAG=${DEPLOY_TAG}" >> "$GITHUB_ENV"
+
+          # Fail early with a clear message if token is missing (push runs should have it)
+          if [ -z "${GITHUB_TOKEN}" ]; then
+            echo "::error::GITHUB_TOKEN is not available in this runner. Secrets are not injected for forked PRs." >&2
+            exit 1
+          fi
+
+          # Prefer deploy tag (last successful deployment), then API, then fallback
+          # Force fetch tags to resolve conflicts
+          git fetch --tags --force --quiet || true
+          if git rev-parse -q --verify "refs/tags/${DEPLOY_TAG}" >/dev/null; then
+            BASE_SHA=$(git rev-list -n1 "${DEPLOY_TAG}")
+            echo "📌 Using baseline tag ${DEPLOY_TAG} @ ${BASE_SHA}"
+            FROM_REF="${BASE_SHA}"
+          else
+            echo "📌 No deploy tag found; checking last successful run via API"
+            # Repository-level runs endpoint (avoids workflow-name encoding issues)
+            API_URL="https://api.github.com/repos/${{ github.repository }}/actions/runs?branch=${{ github.ref_name }}&event=push&status=success&per_page=1"
+
+            # Use -f to make curl exit non-zero on HTTP errors, -S for errors, -s silent otherwise
+            RESP=$(curl -fS -sSL -H "Authorization: Bearer ${GITHUB_TOKEN}" -H "Accept: application/vnd.github+json" "$API_URL" || true)
+
+            # If curl failed with HTTP error, RESP will be empty (because of '|| true'); handle it
+            if [ -z "${RESP}" ]; then
+              echo "::warning::Failed to query GitHub API or no response received. Falling back to event.before."
+              FROM_REF="${{ github.event.before }}"
+            else
+              LAST_SUCCESS_SHA=$(echo "$RESP" | jq -r '.workflow_runs[0].head_sha // empty')
+              if [ -n "${LAST_SUCCESS_SHA}" ]; then
+                FROM_REF="${LAST_SUCCESS_SHA}"
+              else
+                FROM_REF="${{ github.event.before }}"
+              fi
+            fi
+          fi
+
+          echo "📌 Using FROM_REF=${FROM_REF}"
+          echo "FROM_REF=${FROM_REF}" >> "$GITHUB_ENV"
+          echo "TO_REF=${{ github.sha }}" >> "$GITHUB_ENV"
+
+          # Also expose as step outputs (recommended over relying solely on env propagation)
+          echo "from_ref=${FROM_REF}" >> "$GITHUB_OUTPUT"
+          echo "to_ref=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate to Salesforce Org
+        run: |
+          echo "🔐 Authenticating to ${{ env.ORG_NAME }} Salesforce Org..."
+          ./scripts/authenticate.sh
+
+      - name: Smart recovery - check previous build status and merge failed deltas
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          GITHUB_TOKEN="${GITHUB_TOKEN:-}"
+          
+          if [ -z "${GITHUB_TOKEN}" ]; then
+            echo "::warning::GITHUB_TOKEN not available; skipping smart recovery"
+            exit 0
+          fi
+          
+          echo "🔍 Checking previous build status for smart recovery..."
+          
+          # Get the last 2 workflow runs for this branch to check previous run status
+          RUNS_JSON=$(curl -sSL -H "Authorization: Bearer ${GITHUB_TOKEN}" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/runs?branch=${{ github.ref_name }}&per_page=2" || echo '{"workflow_runs":[]}')
+          
+          # Get previous run status (index 1, since index 0 is current run)
+          PREV_RUN_STATUS=$(echo "$RUNS_JSON" | jq -r '.workflow_runs[1].conclusion // "unknown"')
+          PREV_RUN_ID=$(echo "$RUNS_JSON" | jq -r '.workflow_runs[1].id // "unknown"')
+          
+          echo "📊 Previous run status: $PREV_RUN_STATUS (run ID: $PREV_RUN_ID)"
+          
+          # Check for consecutive failures to avoid infinite retry loops
+          FAIL_COUNT=$(curl -sSL -H "Authorization: Bearer ${GITHUB_TOKEN}" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/runs?branch=${{ github.ref_name }}&status=failure&per_page=3" \
+            | jq '.workflow_runs | length' || echo '0')
+          
+          echo "📈 Consecutive failure count: $FAIL_COUNT"
+          
+          # Smart recovery logic
+          if [ "$PREV_RUN_STATUS" = "failure" ] || [ "$PREV_RUN_STATUS" = "timed_out" ]; then
+            if [ "$FAIL_COUNT" -ge 3 ]; then
+              echo "🧹 Too many consecutive failures ($FAIL_COUNT) — resetting to clean state"
+              echo "SMART_RECOVERY_MODE=reset" >> "$GITHUB_ENV"
+            else
+              echo "⚠️ Previous build failed — enabling smart recovery mode"
+              echo "SMART_RECOVERY_MODE=merge_failed" >> "$GITHUB_ENV"
+              
+              # Download outstanding failed-delta artifacts for this branch
+              mkdir -p failed-deltas
+              ARTIFACTS_JSON=$(curl -sSL -H "Authorization: Bearer ${GITHUB_TOKEN}" -H "Accept: application/vnd.github+json" \
+                "https://api.github.com/repos/${{ github.repository }}/actions/artifacts" || echo '{"artifacts":[]}')
+              
+              # Filter by name pattern failed-delta-${GITHUB_REF_NAME} and download
+              echo "$ARTIFACTS_JSON" | jq -r \
+                --arg name "failed-delta-${{ github.ref_name }}" \
+                '.artifacts[] | select(.name | startswith($name)) | .archive_download_url' \
+                | while read -r url; do
+                  if [ -n "$url" ]; then
+                    echo "📥 Downloading failed delta: $url"
+                    tmp_zip="/tmp/failed_delta_$(basename "$url").zip"
+                    curl -sSL -H "Authorization: Bearer ${GITHUB_TOKEN}" -H "Accept: application/vnd.github+json" -o "$tmp_zip" "$url"
+                    unzip -o "$tmp_zip" -d failed-deltas || true
+                    rm -f "$tmp_zip"
+                  fi
+                done
+              
+              # Merge failed deltas into delta/force-app if any were downloaded
+              if [ -d "failed-deltas" ] && [ "$(find failed-deltas -type f | wc -l)" -gt 0 ]; then
+                echo "🔄 Merging failed deltas into current delta package"
+                mkdir -p delta/force-app
+                cp -R failed-deltas/* delta/force-app/ || true
+                echo "✅ Merged failed deltas - deployment will include previously failed components"
+              else
+                echo "ℹ️ No failed deltas found to merge"
+              fi
+            fi
+          else
+            echo "✅ Previous build succeeded — starting clean delta from deploy tag"
+            echo "SMART_RECOVERY_MODE=clean" >> "$GITHUB_ENV"
+          fi
+
+      - name: Generate Delta Package
+        env:
+          TARGET_BRANCH: ${{ github.ref_name }}
+          FROM_REF: ${{ env.FROM_REF }}
+          TO_REF: ${{ env.TO_REF }}
+        run: |
+          echo "🔍 Generating delta package for ${{ env.ORG_NAME }} environment..."
+          ./scripts/generate_delta.sh
+          
+          if [ -f "delta/package/package.xml" ]; then
+            # Check if package.xml has actual components (not just empty)
+            COMPONENT_COUNT=$(grep -c "<types>" delta/package/package.xml 2>/dev/null || echo "0")
+            
+            if [ "$COMPONENT_COUNT" -gt 0 ]; then
+              echo "✅ Delta package generated successfully with $COMPONENT_COUNT component types"
+              echo "HAS_DEPLOYMENT_PACKAGE=true" >> $GITHUB_ENV
+            else
+              echo "⚠️ Delta package is empty (no components to deploy)"
+              echo "HAS_DEPLOYMENT_PACKAGE=false" >> $GITHUB_ENV
+            fi
+          else
+            echo "⚠️ No delta package generated"
+            echo "HAS_DEPLOYMENT_PACKAGE=false" >> $GITHUB_ENV
+          fi
+
+      - name: Skip deployment if no changes
+        if: env.HAS_DEPLOYMENT_PACKAGE != 'true'
+        run: |
+          echo "✅ No changes detected - skipping deployment"
+          echo "🚀 Deployment completed successfully (no changes to deploy)"
+
+      - name: Map Tests (optional)
+        if: env.HAS_DEPLOYMENT_PACKAGE == 'true'
+        run: ./scripts/map_tests.sh
+
+      - name: Deploy to ${{ env.ORG_NAME }} with live progress
+        if: env.HAS_DEPLOYMENT_PACKAGE == 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p reports
+          if [ -d delta/force-app ] && [ "$(find delta/force-app -type f | wc -l)" -gt 0 ]; then
+            echo "🔧 Preparing deployment arguments..."
+            DEPLOY_ARGS=(--source-dir delta/force-app --target-org "${ORG_NAME}")
+
+            if [ -n "${RELATED_TESTS:-}" ]; then
+              TEST_LIST=$(echo "$RELATED_TESTS" | xargs -n1 | paste -sd, -)
+              DEPLOY_ARGS+=(--test-level RunSpecifiedTests --tests "$TEST_LIST")
+              echo "🧪 Using mapped tests: $TEST_LIST"
+            else
+              if find delta/force-app -name "*.cls" -o -name "*.trigger" | grep -q .; then
+                DEPLOY_ARGS+=(--test-level RunLocalTests)
+                echo "🧪 Apex detected; using RunLocalTests"
+              else
+                DEPLOY_ARGS+=(--test-level NoTestRun)
+                echo "🧪 No Apex detected; using NoTestRun"
+              fi
+            fi
+
+            echo "🚀 Starting deployment (async) and capturing job id..."
+            set +e
+            START_JSON=$(sf project deploy start "${DEPLOY_ARGS[@]}" --json --wait 1)
+            START_EXIT=$?
+            set -e
+            echo "$START_JSON" > reports/deploy-start.json || true
+            if [ $START_EXIT -ne 0 ]; then
+              echo "❌ Failed to start deployment"
+              echo "$START_JSON"
+              exit $START_EXIT
+            fi
+
+            DEPLOY_ID=$(echo "$START_JSON" | jq -r '.result.id // .result.deploymentId // .result.jobId // empty')
+            if [ -z "$DEPLOY_ID" ] || [ "$DEPLOY_ID" = "null" ]; then
+              echo "❌ Could not determine deployment ID from start response"
+              echo "$START_JSON"
+              exit 1
+            fi
+            echo "📦 Deployment ID: $DEPLOY_ID"
+
+            echo "📡 Polling deployment progress..."
+            LAST_STATUS=""
+            while true; do
+              set +e
+              REPORT_JSON=$(sf project deploy report --job-id "$DEPLOY_ID" --json)
+              REPORT_EXIT=$?
+              set -e
+              echo "$REPORT_JSON" > reports/deploy-report.json || true
+              if [ $REPORT_EXIT -ne 0 ] || [ -z "$REPORT_JSON" ]; then
+                echo "⚠️  Unable to fetch deployment report (code=$REPORT_EXIT); retrying in 10s..."
+                sleep 10
+                continue
+              fi
+
+              STATUS=$(echo "$REPORT_JSON" | jq -r '.result.status // .status // "Unknown"')
+              TOTAL=$(echo "$REPORT_JSON" | jq -r '.result.numberComponentsTotal // .numberComponentsTotal // 0')
+              DONE=$(echo "$REPORT_JSON" | jq -r '.result.numberComponentsDeployed // .numberComponentsDeployed // 0')
+              ERR=$(echo "$REPORT_JSON" | jq -r '.result.numberComponentErrors // .numberComponentErrors // 0')
+              T_TOTAL=$(echo "$REPORT_JSON" | jq -r '.result.numberTestsTotal // .numberTestsTotal // 0')
+              T_DONE=$(echo "$REPORT_JSON" | jq -r '.result.numberTestsCompleted // .numberTestsCompleted // 0')
+              T_FAIL=$(echo "$REPORT_JSON" | jq -r '.result.numberTestErrors // .numberTestErrors // 0')
+
+              TS=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+              if [ "$STATUS" != "$LAST_STATUS" ]; then
+                echo "$TS ▶️  Status: $STATUS | Components: $DONE/$TOTAL (errors: $ERR) | Tests: $T_DONE/$T_TOTAL (failures: $T_FAIL)"
+                LAST_STATUS="$STATUS"
+              else
+                echo "$TS ⏳ Progress: $DONE/$TOTAL comps, $T_DONE/$T_TOTAL tests, errs=$ERR, test-fails=$T_FAIL"
+              fi
+
+            case "$STATUS" in
+                Succeeded|SucceededPartial)
+                  echo "✅ Deployment completed successfully"
+                  
+                  # Generate deployment executive summary
+                  echo ""
+                  echo "═══════════════════════════════════════════════════════"
+                  echo "🎯 DEPLOYMENT EXECUTIVE SUMMARY"
+                  echo "═══════════════════════════════════════════════════════"
+                  
+                  if [ -f "delta/package/package.xml" ]; then
+                    echo ""
+                    echo "📦 DEPLOYED PACKAGE CONTENTS:"
+                    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                    cat delta/package/package.xml
+                    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                    
+                    # Parse and display component summary
+                    echo ""
+                    echo "📊 COMPONENT DEPLOYMENT SUMMARY:"
+                    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                    
+                    # Extract component types and members
+                    COMPONENT_TYPES=$(grep -o '<name>[^<]*</name>' delta/package/package.xml | sed 's/<name>//g' | sed 's/<\/name>//g' | sort | uniq)
+                    
+                    for COMP_TYPE in $COMPONENT_TYPES; do
+                      MEMBERS=$(grep -A 1 "<name>$COMP_TYPE</name>" delta/package/package.xml | grep '<members>' | sed 's/<members>//g' | sed 's/<\/members>//g' | sed 's/^[[:space:]]*//')
+                      MEMBER_COUNT=$(echo "$MEMBERS" | grep -c . 2>/dev/null || echo "0")
+                      echo "   🔧 $COMP_TYPE: $MEMBER_COUNT component(s)"
+                      if [ -n "$MEMBERS" ]; then
+                        while IFS= read -r member; do
+                          if [ -n "$member" ] && [[ ! "$member" =~ ^[[:space:]]*$ ]]; then
+                            echo "      • $member"
+                          fi
+                        done <<< "$MEMBERS" 2>/dev/null || true
+                      fi
+                    done
+                    
+                    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                    echo "📈 DEPLOYMENT STATISTICS:"
+                    echo "   • Total Components: $TOTAL"
+                    echo "   • Successfully Deployed: $DONE"
+                    echo "   • Component Errors: $ERR"
+                    echo "   • Test Coverage: $T_DONE/$T_TOTAL"
+                    echo "   • Test Failures: $T_FAIL"
+                    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                  else
+                    echo ""
+                    echo "📝 SCRIPT/YAML CHANGES ONLY:"
+                    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                    
+                    # Dynamically detect changed files
+                    CHANGED_FILES=$(git diff --name-only origin/${{ github.ref_name }} HEAD 2>/dev/null || git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "")
+                    
+                    if [ -n "$CHANGED_FILES" ]; then
+                      echo "   📁 Files Modified in This Deployment:"
+                      echo "$CHANGED_FILES" | while read -r file; do
+                        if [ -n "$file" ]; then
+                          echo "      • $file"
+                        fi
+                      done
+                    else
+                      echo "   • No changed files detected"
+                    fi
+                    
+                    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                    echo "ℹ️  No Salesforce/Vlocity components deployed - script/YAML changes only"
+                  fi
+                  
+                  echo "═══════════════════════════════════════════════════════"
+                  
+                # Advance environment deployment tag only if a real deployment package existed
+                if [ "${HAS_DEPLOYMENT_PACKAGE:-false}" = "true" ]; then
+                  echo "🏷️  Advancing tag ${DEPLOY_TAG} -> ${GITHUB_SHA}"
+                  # Configure git user for tag operations
+                  git config user.email "github-actions[bot]@users.noreply.github.com" || true
+                  git config user.name "github-actions[bot]" || true
+                  
+                  # Force fetch to resolve any tag conflicts
+                  git fetch --tags --force --quiet || true
+                  
+                  # Create/update the tag locally
+                  git tag -f "${DEPLOY_TAG}" "${GITHUB_SHA}" || true
+                  
+                  # Push the tag with force to resolve remote conflicts
+                  git push origin -f "${DEPLOY_TAG}" || true
+                  
+                  echo "✅ Tag ${DEPLOY_TAG} advanced to ${GITHUB_SHA}"
+                else
+                  echo "ℹ️  Skipping tag advance (no deployment package)."
+                fi
+                  break
+                  ;;
+                Failed|Canceled|Aborted|Rejected)
+                  echo "❌ Deployment finished with status: $STATUS"
+                  # Print error summary if available
+                  echo "$REPORT_JSON" | jq -r '.result.details.componentFailures // .details.componentFailures // empty' | head -200 || true
+                  exit 1
+                  ;;
+                *)
+                  sleep 10
+                  ;;
+              esac
+            done
+          else
+            echo "No deployable delta; skipping."
+          fi
+
+      - name: Clean up failed delta artifacts after successful deployment
+        if: success() && env.HAS_DEPLOYMENT_PACKAGE == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          GITHUB_TOKEN="${GITHUB_TOKEN:-}"
+          
+          if [ -z "${GITHUB_TOKEN}" ]; then
+            echo "::warning::GITHUB_TOKEN not available; skipping failed delta cleanup"
+            exit 0
+          fi
+          
+          echo "🧹 Cleaning up failed delta artifacts for branch ${{ github.ref_name }}"
+          
+          # Get all artifacts and filter by failed-delta pattern for this branch
+          ARTIFACTS_JSON=$(curl -sSL -H "Authorization: Bearer ${GITHUB_TOKEN}" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/artifacts?per_page=100" || echo '{"artifacts":[]}')
+          
+          # Delete failed-delta artifacts for this branch
+          echo "$ARTIFACTS_JSON" | jq -r \
+            --arg name "failed-delta-${{ github.ref_name }}" \
+            '.artifacts[] | select(.name | startswith($name)) | .id' \
+            | while read -r artifact_id; do
+              if [ -n "$artifact_id" ]; then
+                echo "🗑️ Deleting failed delta artifact: $artifact_id"
+                curl -sSL -X DELETE -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+                  "https://api.github.com/repos/${{ github.repository }}/actions/artifacts/$artifact_id" || true
+              fi
+            done
+          
+          echo "✅ Cleaned up failed delta artifacts"
+
+      - name: Upload failed delta on deployment failure
+        if: failure() && env.HAS_DEPLOYMENT_PACKAGE == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: failed-delta-${{ github.ref_name }}-${{ github.run_id }}
+          path: delta/force-app
+          retention-days: 3
+
+      - name: Upload deployment reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-reports-${{ env.ORG_NAME }}-${{ github.run_id }}
+          path: reports/
+          retention-days: 30
+
+      - name: Generate Dynamic Deployment Email Content
+        if: always()
+        id: generate-deployment-email
+        run: |
+          echo "🎯 ${{ env.ORG_NAME }} ENVIRONMENT DEPLOYMENT SUMMARY" > deployment_email_content.txt
+          echo "═══════════════════════════════════════════════════════" >> deployment_email_content.txt
+          echo "" >> deployment_email_content.txt
+          echo "📋 Deployment Details:" >> deployment_email_content.txt
+          echo "• Environment: ${{ env.ORG_NAME }}" >> deployment_email_content.txt
+          echo "• Branch: ${{ github.ref_name }}" >> deployment_email_content.txt
+          echo "• Commit: ${{ github.sha }}" >> deployment_email_content.txt
+          echo "• Author: ${{ github.actor }}" >> deployment_email_content.txt
+          echo "• Deployment Status: ${{ job.status == 'success' && '✅ SUCCESS' || '❌ FAILED' }}" >> deployment_email_content.txt
+          echo "" >> deployment_email_content.txt
+          echo "🔍 Deployment Results:" >> deployment_email_content.txt
+          echo "• Smart Recovery: ${{ env.SMART_RECOVERY_MODE || 'clean' }}" >> deployment_email_content.txt
+          echo "• Deployment Package: ${{ env.HAS_DEPLOYMENT_PACKAGE == 'true' && 'Present' || 'Not Required' }}" >> deployment_email_content.txt
+          echo "• Quality Gates: ${{ job.status == 'success' && '✅ PASSED' || '❌ FAILED' }}" >> deployment_email_content.txt
+          echo "" >> deployment_email_content.txt
+          echo "📊 Pipeline Statistics:" >> deployment_email_content.txt
+          echo "• Workflow Run: ${{ github.run_id }}" >> deployment_email_content.txt
+          echo "• Environment: ${{ env.ORG_NAME }}" >> deployment_email_content.txt
+          echo "• Deployment Tag: ${{ env.DEPLOY_TAG || 'N/A' }}" >> deployment_email_content.txt
+          echo "" >> deployment_email_content.txt
+          echo "🔗 View Details:" >> deployment_email_content.txt
+          echo "• Repository: ${{ github.repository }}" >> deployment_email_content.txt
+          echo "• Workflow Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> deployment_email_content.txt
+          echo "• Branch: ${{ github.server_url }}/${{ github.repository }}/tree/${{ github.ref_name }}" >> deployment_email_content.txt
+          
+          EMAIL_CONTENT=$(cat deployment_email_content.txt 2>/dev/null || echo "Email content generation failed")
+          echo "email_content<<EOF" >> $GITHUB_OUTPUT
+          echo "$EMAIL_CONTENT" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Send Deployment Summary Email
+        if: always()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 587
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: "🚀 ${{ env.ORG_NAME }} Environment Deployment Summary - ${{ github.ref_name }}"
+          to: ${{ secrets.NOTIFICATION_EMAIL }}
+          from: GitHub Actions <${{ secrets.EMAIL_USERNAME }}>
+          body: ${{ steps.generate-deployment-email.outputs.email_content }}

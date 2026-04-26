@@ -1,0 +1,12 @@
+{
+  "name": "InvalidProjectWorkspaceError",
+  "message": "/Users/rkasturi/GITHUB_ACTIONS_PERSONAL_DEMO/GITHUBACTIONS-DEMO does not contain a valid Salesforce DX project.",
+  "exitCode": 1,
+  "context": "DeployMetadata",
+  "stack": "InvalidProjectWorkspaceError: /Users/rkasturi/GITHUB_ACTIONS_PERSONAL_DEMO/GITHUBACTIONS-DEMO does not contain a valid Salesforce DX project.\n    at SfCommandError.from (file:///Users/rkasturi/.nvm/versions/node/v18.19.1/lib/node_modules/@salesforce/cli/node_modules/@salesforce/sf-plugins-core/lib/SfCommandError.js:39:16)\n    at DeployMetadata.catch (file:///Users/rkasturi/.nvm/versions/node/v18.19.1/lib/node_modules/@salesforce/cli/node_modules/@salesforce/sf-plugins-core/lib/sfCommand.js:323:47)\n    at DeployMetadata.catch (file:///Users/rkasturi/.nvm/versions/node/v18.19.1/lib/node_modules/@salesforce/cli/node_modules/@salesforce/plugin-deploy-retrieve/lib/commands/project/deploy/start.js:276:27)\n    at DeployMetadata._run (/Users/rkasturi/.nvm/versions/node/v18.19.1/lib/node_modules/@salesforce/cli/node_modules/@oclif/core/lib/command.js:185:29)\n    at async Config.runCommand (/Users/rkasturi/.nvm/versions/node/v18.19.1/lib/node_modules/@salesforce/cli/node_modules/@oclif/core/lib/config/config.js:456:25)\n    at async run (/Users/rkasturi/.nvm/versions/node/v18.19.1/lib/node_modules/@salesforce/cli/node_modules/@oclif/core/lib/main.js:97:16)\n    at async file:///Users/rkasturi/.nvm/versions/node/v18.19.1/lib/node_modules/@salesforce/cli/bin/run.js:15:1",
+  "cause": "undefined",
+  "warnings": [],
+  "code": "InvalidProjectWorkspaceError",
+  "status": 1,
+  "commandName": "DeployMetadata"
+}
