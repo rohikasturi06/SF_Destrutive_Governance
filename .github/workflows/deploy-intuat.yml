@@ -140,43 +140,50 @@ jobs:
             echo "ℹ️ No LWC components in delta"
           fi
           
+          # Reasoning: generate_delta.sh has already written HAS_DEPLOYMENT_PACKAGE
+          # and HAS_DESTRUCTIVE_CHANGES to $GITHUB_ENV (single source of truth).
+          # We re-read those values here so destructive-only PRs (no source
+          # metadata, only deletions) still flow into validation.
+          DELTA_HAS_PKG=$(grep '^HAS_DEPLOYMENT_PACKAGE=' "$GITHUB_ENV" 2>/dev/null | tail -n1 | cut -d= -f2- || echo "false")
+          DELTA_HAS_DESTRUCTIVE=$(grep '^HAS_DESTRUCTIVE_CHANGES=' "$GITHUB_ENV" 2>/dev/null | tail -n1 | cut -d= -f2- || echo "false")
+          DELTA_DESTRUCTIVE_COUNT=$(grep '^DESTRUCTIVE_MEMBER_COUNT=' "$GITHUB_ENV" 2>/dev/null | tail -n1 | cut -d= -f2- || echo "0")
+
           if [ -f "delta/package/package.xml" ]; then
-            # Check if package.xml has actual components (not just empty)
             COMPONENT_COUNT=$(grep -c "<types>" delta/package/package.xml 2>/dev/null || echo "0")
-            
+          else
+            COMPONENT_COUNT=0
+          fi
+
+          echo "🔍 Delta diagnostics:"
+          echo "   • Source component types in package.xml : ${COMPONENT_COUNT}"
+          echo "   • Destructive members                   : ${DELTA_DESTRUCTIVE_COUNT}"
+          echo "   • generate_delta.sh HAS_DEPLOYMENT_PACKAGE: ${DELTA_HAS_PKG}"
+
+          if [ "$DELTA_HAS_PKG" = "true" ] || [ "$COMPONENT_COUNT" -gt 0 ] || [ "$DELTA_HAS_DESTRUCTIVE" = "true" ]; then
             if [ "$COMPONENT_COUNT" -gt 0 ]; then
-              echo "✅ Delta package generated successfully with $COMPONENT_COUNT component types"
-              echo "HAS_DEPLOYMENT_PACKAGE=true" >> $GITHUB_ENV
-            else
-              echo "⚠️ Delta package is empty (no Salesforce/Vlocity components to deploy)"
-              echo ""
-              echo "📄 Empty Package.xml Contents:"
+              echo "✅ Source delta detected (${COMPONENT_COUNT} component types)"
+            fi
+            if [ "$DELTA_HAS_DESTRUCTIVE" = "true" ]; then
+              echo "🗑  Destructive delta detected (${DELTA_DESTRUCTIVE_COUNT} member(s))"
+            fi
+            echo "HAS_DEPLOYMENT_PACKAGE=true" >> $GITHUB_ENV
+          else
+            echo "⚠️ Empty delta — no Salesforce/Vlocity components and no destructive changes"
+            echo ""
+            if [ -f "delta/package/package.xml" ]; then
+              echo "📄 Package.xml Contents:"
               echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
               cat delta/package/package.xml
               echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-              echo ""
-              echo "📝 Files Modified in This Change (Script/YAML Only):"
-              echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-              
-              # Dynamically detect changed files from git diff
-              CHANGED_FILES=$(git diff --name-only origin/${{ github.event.pull_request.base.ref }} HEAD 2>/dev/null || git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "")
-              
-              if [ -n "$CHANGED_FILES" ]; then
-                echo "$CHANGED_FILES" | while read -r file; do
-                  if [ -n "$file" ]; then
-                    echo "   • $file"
-                  fi
-                done
-              else
-                echo "   • No changed files detected"
-              fi
-              
-              echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-              echo "ℹ️  No Salesforce or Vlocity components detected - only script/YAML changes"
-              echo "HAS_DEPLOYMENT_PACKAGE=false" >> $GITHUB_ENV
             fi
-          else
-            echo "⚠️ No delta package generated"
+            echo ""
+            echo "📝 Files Modified in This Change (Script/YAML Only):"
+            CHANGED_FILES=$(git diff --name-only origin/${{ github.event.pull_request.base.ref }} HEAD 2>/dev/null || git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "")
+            if [ -n "$CHANGED_FILES" ]; then
+              echo "$CHANGED_FILES" | sed 's/^/   • /'
+            else
+              echo "   • No changed files detected"
+            fi
             echo "HAS_DEPLOYMENT_PACKAGE=false" >> $GITHUB_ENV
           fi
 

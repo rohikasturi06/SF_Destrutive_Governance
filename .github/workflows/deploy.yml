@@ -240,19 +240,33 @@ jobs:
           echo "🔍 Generating delta package for ${{ env.ORG_NAME }} environment..."
           ./scripts/generate_delta.sh
           
+          # Reasoning: generate_delta.sh writes HAS_DEPLOYMENT_PACKAGE and
+          # HAS_DESTRUCTIVE_CHANGES to $GITHUB_ENV (single source of truth).
+          # Re-read here so pure-deletion merges (destructive-only) still deploy.
+          DELTA_HAS_PKG=$(grep '^HAS_DEPLOYMENT_PACKAGE=' "$GITHUB_ENV" 2>/dev/null | tail -n1 | cut -d= -f2- || echo "false")
+          DELTA_HAS_DESTRUCTIVE=$(grep '^HAS_DESTRUCTIVE_CHANGES=' "$GITHUB_ENV" 2>/dev/null | tail -n1 | cut -d= -f2- || echo "false")
+          DELTA_DESTRUCTIVE_COUNT=$(grep '^DESTRUCTIVE_MEMBER_COUNT=' "$GITHUB_ENV" 2>/dev/null | tail -n1 | cut -d= -f2- || echo "0")
+
           if [ -f "delta/package/package.xml" ]; then
-            # Check if package.xml has actual components (not just empty)
             COMPONENT_COUNT=$(grep -c "<types>" delta/package/package.xml 2>/dev/null || echo "0")
-            
-            if [ "$COMPONENT_COUNT" -gt 0 ]; then
-              echo "✅ Delta package generated successfully with $COMPONENT_COUNT component types"
-              echo "HAS_DEPLOYMENT_PACKAGE=true" >> $GITHUB_ENV
-            else
-              echo "⚠️ Delta package is empty (no components to deploy)"
-              echo "HAS_DEPLOYMENT_PACKAGE=false" >> $GITHUB_ENV
-            fi
           else
-            echo "⚠️ No delta package generated"
+            COMPONENT_COUNT=0
+          fi
+
+          echo "🔍 Delta diagnostics:"
+          echo "   • Source component types        : ${COMPONENT_COUNT}"
+          echo "   • Destructive members           : ${DELTA_DESTRUCTIVE_COUNT}"
+
+          if [ "$DELTA_HAS_PKG" = "true" ] || [ "$COMPONENT_COUNT" -gt 0 ] || [ "$DELTA_HAS_DESTRUCTIVE" = "true" ]; then
+            if [ "$COMPONENT_COUNT" -gt 0 ]; then
+              echo "✅ Source delta (${COMPONENT_COUNT} component types)"
+            fi
+            if [ "$DELTA_HAS_DESTRUCTIVE" = "true" ]; then
+              echo "🗑  Destructive delta (${DELTA_DESTRUCTIVE_COUNT} member(s))"
+            fi
+            echo "HAS_DEPLOYMENT_PACKAGE=true" >> $GITHUB_ENV
+          else
+            echo "⚠️ No deployable changes (no source, no destructive)"
             echo "HAS_DEPLOYMENT_PACKAGE=false" >> $GITHUB_ENV
           fi
 
@@ -271,22 +285,28 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p reports
-          if [ -d delta/force-app ] && [ "$(find delta/force-app -type f | wc -l)" -gt 0 ]; then
-            echo "🔧 Preparing deployment arguments..."
-            DEPLOY_ARGS=(--source-dir delta/force-app --target-org "${ORG_NAME}")
+          # Source shared lib so destructive flags, manifest fallback (for
+          # destructive-only deploys) and test selection stay in lockstep with
+          # the validation pipeline.
+          # shellcheck source=scripts/_deployment_lib.sh
+          source scripts/_deployment_lib.sh
+          detect_destructive_changes
+          print_destructive_preview
 
-            if [ -n "${RELATED_TESTS:-}" ]; then
-              TEST_LIST=$(echo "$RELATED_TESTS" | xargs -n1 | paste -sd, -)
-              DEPLOY_ARGS+=(--test-level RunSpecifiedTests --tests "$TEST_LIST")
-              echo "🧪 Using mapped tests: $TEST_LIST"
-            else
-              if find delta/force-app -name "*.cls" -o -name "*.trigger" | grep -q .; then
-                DEPLOY_ARGS+=(--test-level RunLocalTests)
-                echo "🧪 Apex detected; using RunLocalTests"
-              else
-                DEPLOY_ARGS+=(--test-level NoTestRun)
-                echo "🧪 No Apex detected; using NoTestRun"
+          if has_any_deployable; then
+            echo "🔧 Preparing deployment arguments..."
+            declare -a DEPLOY_ARGS=()
+            read_deploy_args_core_into DEPLOY_ARGS "${ORG_NAME}"
+
+            DEPLOY_TEST_LEVEL="NoTestRun"
+            for ((idx=0; idx<${#DEPLOY_ARGS[@]}; idx++)); do
+              if [ "${DEPLOY_ARGS[$idx]}" = "--test-level" ]; then
+                DEPLOY_TEST_LEVEL="${DEPLOY_ARGS[$((idx+1))]}"
               fi
+            done
+            echo "🧪 Test Strategy: ${DEPLOY_TEST_LEVEL}"
+            if [ "${HAS_DESTRUCTIVE_CHANGES:-false}" = "true" ]; then
+              echo "🗑  Destructive members: ${DESTRUCTIVE_MEMBER_COUNT} (--post-destructive-changes)"
             fi
 
             echo "🚀 Starting deployment (async) and capturing job id..."
