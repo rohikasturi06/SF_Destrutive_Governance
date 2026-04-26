@@ -9,8 +9,8 @@
     <variables>
         <name>varText</name>
         <dataType>String</dataType>
-        <isCollection>false</isCollection>
-        <isInput>false</isInput>
+        <isCollection>true</isCollection>
+        <isInput>true</isInput>
         <isOutput>false</isOutput>
     </variables>
 
