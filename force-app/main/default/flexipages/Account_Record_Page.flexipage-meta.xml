@@ -15,5 +15,8 @@
     </flexiPageRegions>
     <masterLabel>Account Record Page</masterLabel>
     <sobjectType>Account</sobjectType>
+    <template>
+        <name>flexipage:recordHomeTemplateDesktop</name>
+    </template>
     <type>RecordPage</type>
 </FlexiPage>
