@@ -12,6 +12,7 @@ on:
 permissions:
   contents: write
   actions: read
+  pull-requests: write   # required to post the executive summary as a sticky PR comment
 
 env:
   SEVERITY_THRESHOLD: 3  # High/Critical violations only
@@ -585,8 +586,47 @@ jobs:
           echo "$EMAIL_CONTENT" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
-      - name: Send PR Validation Summary Email
+      - name: Detect email notification configuration
         if: always()
+        run: |
+          if [ -n "${{ secrets.EMAIL_USERNAME }}" ] && [ -n "${{ secrets.EMAIL_PASSWORD }}" ] && [ -n "${{ secrets.NOTIFICATION_EMAIL }}" ]; then
+            echo "HAS_EMAIL_CONFIG=true"  >> "$GITHUB_ENV"
+          else
+            echo "HAS_EMAIL_CONFIG=false" >> "$GITHUB_ENV"
+            echo "ℹ️  Email notifications skipped — EMAIL_USERNAME/EMAIL_PASSWORD/NOTIFICATION_EMAIL secrets not all set."
+          fi
+
+      - name: Build Executive Summary (Markdown)
+        if: always()
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          TARGET_ENV: ${{ env.TARGET_ENV }}
+          TARGET_BRANCH: ${{ github.event.pull_request.base.ref }}
+          WORKFLOW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          COVERAGE_THRESHOLD: ${{ env.COVERAGE_THRESHOLD }}
+        run: |
+          chmod +x ./scripts/build_executive_summary.sh
+          ./scripts/build_executive_summary.sh reports/executive-summary.md || true
+
+      - name: Append Executive Summary to GitHub Step Summary
+        if: always()
+        run: |
+          if [ -f reports/executive-summary.md ]; then
+            cat reports/executive-summary.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Post Executive Summary as PR Comment
+        if: always() && github.event_name == 'pull_request'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: deployment-summary-${{ env.TARGET_ENV }}
+          path: reports/executive-summary.md
+
+      - name: Send PR Validation Summary Email
+        if: always() && env.HAS_EMAIL_CONFIG == 'true'
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: smtp.gmail.com

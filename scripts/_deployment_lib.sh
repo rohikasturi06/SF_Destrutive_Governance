@@ -225,16 +225,30 @@ build_deploy_args_core() {
 
   local lines=()
 
-  if has_source_metadata; then
-    lines+=("--source-dir" "$DELTA_SOURCE_DIR")
-  elif [ "${HAS_DESTRUCTIVE_CHANGES:-false}" = "true" ]; then
-    # Destructive-only: still need a manifest. Prefer the destructive-changes
-    # package wrapper, fall back to the empty top-level package.xml.
-    if [ -f "$DELTA_DESTRUCTIVE_PACKAGE_FILE" ]; then
+  # Salesforce CLI strict rule:
+  #   --post-destructive-changes is mutually exclusive with --source-dir.
+  #   When deletions are present we MUST use --manifest. The CLI then resolves
+  #   listed components via the project's sfdx-project.json (force-app/), and
+  #   processes destructive changes after the source deploy.
+  if [ "${HAS_DESTRUCTIVE_CHANGES:-false}" = "true" ]; then
+    # Source + destructive → manifest from the delta source package (lists the
+    # added/modified members). CLI loads files from the project's package
+    # directories (e.g. force-app/) per sfdx-project.json.
+    # Destructive-only → use the destructive package wrapper (empty <types>),
+    # still required by the CLI even when there is no source to deploy.
+    if has_source_metadata && [ -f "$DELTA_PACKAGE_FILE" ]; then
+      lines+=("--manifest" "$DELTA_PACKAGE_FILE")
+    elif [ -f "$DELTA_DESTRUCTIVE_PACKAGE_FILE" ]; then
       lines+=("--manifest" "$DELTA_DESTRUCTIVE_PACKAGE_FILE")
     elif [ -f "$DELTA_PACKAGE_FILE" ]; then
       lines+=("--manifest" "$DELTA_PACKAGE_FILE")
+    else
+      # No manifest available; nothing the CLI can act on.
+      return 0
     fi
+  elif has_source_metadata; then
+    # No deletions → safe to pass --source-dir directly.
+    lines+=("--source-dir" "$DELTA_SOURCE_DIR")
   else
     # Nothing to do — caller should have short-circuited via has_any_deployable.
     return 0
