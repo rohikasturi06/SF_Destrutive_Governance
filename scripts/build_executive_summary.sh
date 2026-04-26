@@ -68,6 +68,20 @@ fi
 detect_destructive_changes
 
 # ------------------------------------------------------------------------------
+# Pre-flight orphaned-dependency report.
+#
+# scripts/scan_dependencies.sh writes reports/dependency-errors.md when it
+# finds blocking references. If that file exists and is non-empty, we promote
+# it to the very top of the executive summary so the PO sees the cleanup
+# checklist before anything else.
+# ------------------------------------------------------------------------------
+DEPENDENCY_ERRORS_PRESENT="false"
+DEPENDENCY_ERRORS_FILE="reports/dependency-errors.md"
+if [ -s "$DEPENDENCY_ERRORS_FILE" ]; then
+  DEPENDENCY_ERRORS_PRESENT="true"
+fi
+
+# ------------------------------------------------------------------------------
 # Pull metrics from reports/
 # ------------------------------------------------------------------------------
 DEPLOY_STATUS="Unknown"
@@ -123,6 +137,15 @@ case "$DEPLOY_STATUS" in
     ;;
 esac
 
+# Pre-flight scanner outranks deploy status — if it flagged orphaned refs the
+# Salesforce dry-run never got to run, and the merge must be blocked.
+if [ "$DEPENDENCY_ERRORS_PRESENT" = "true" ]; then
+  OVERALL="🛑 BLOCKED"
+  OVERALL_NOTE="Orphaned references — clean up referenced files first"
+  DR_STATUS="⏭️ NOT RUN"
+  DR_NOTE="Pre-flight dependency scan blocked the deployment validation"
+fi
+
 if [ "$TOTAL_VIOLATIONS" -eq 0 ]; then
   CQ_STATUS="🟢 100%"
   CQ_NOTE="0 violations found"
@@ -171,6 +194,15 @@ fi
   echo "| **Dry-Run Deploy** | ${DR_STATUS} | ${DR_NOTE} |"
   echo ""
 } >> "$OUTPUT_FILE"
+
+# ------------------------------------------------------------------------------
+# Orphaned dependency block (always at the very top of the body so it's the
+# first concrete content the PO/developer sees).
+# ------------------------------------------------------------------------------
+if [ "$DEPENDENCY_ERRORS_PRESENT" = "true" ]; then
+  cat "$DEPENDENCY_ERRORS_FILE" >> "$OUTPUT_FILE"
+  echo "" >> "$OUTPUT_FILE"
+fi
 
 # ------------------------------------------------------------------------------
 # Destructive Changes — high-alert section, business terms

@@ -324,6 +324,19 @@ jobs:
         if: env.HAS_ORG_AUTH == 'true'
         run: ./scripts/map_tests.sh
 
+      # STAGE 5.5: PRE-FLIGHT ORPHANED DEPENDENCY SCAN
+      # Block deletions that still have live references in the repo before
+      # Salesforce dry-run. Errors land in reports/dependency-errors.md and
+      # are auto-promoted to the top of the executive summary PR comment.
+
+      - name: 🛑 Pre-Flight Dependency Scan
+        if: env.HAS_ORG_AUTH == 'true' && env.HAS_DESTRUCTIVE_CHANGES == 'true'
+        env:
+          TARGET_BRANCH: ${{ github.event.pull_request.base.ref || github.base_ref || github.ref_name }}
+        run: |
+          chmod +x ./scripts/scan_dependencies.sh
+          ./scripts/scan_dependencies.sh
+
       # STAGE 6: QA ENVIRONMENT VALIDATION
 
       - name: QA QUALITY GATE VALIDATION
