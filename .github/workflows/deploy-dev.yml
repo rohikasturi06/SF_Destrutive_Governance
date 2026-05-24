@@ -150,7 +150,11 @@ jobs:
           DELTA_DESTRUCTIVE_COUNT=$(grep '^DESTRUCTIVE_MEMBER_COUNT=' "$GITHUB_ENV" 2>/dev/null | tail -n1 | cut -d= -f2- || echo "0")
 
           if [ -f "delta/package/package.xml" ]; then
-            COMPONENT_COUNT=$(grep -c "<types>" delta/package/package.xml 2>/dev/null || echo "0")
+            # `grep -c` prints "0" AND exits 1 when no matches, so the legacy
+            # `|| echo "0"` pattern produced the two-line string "0\n0", which
+            # then broke the `[ -gt 0 ]` integer test below. Capture stdout
+            # cleanly and fall back to 0 only if the command itself failed.
+            COMPONENT_COUNT=$(grep -c "<types>" delta/package/package.xml 2>/dev/null) || COMPONENT_COUNT=0
           else
             COMPONENT_COUNT=0
           fi
@@ -449,7 +453,7 @@ jobs:
           # Check if we have Salesforce/Vlocity components by parsing SGD-generated package.xml
           if [ -f "delta/package/package.xml" ]; then
             # Count total component types in package.xml
-            TOTAL_COMPONENT_TYPES=$(grep -c "<types>" delta/package/package.xml 2>/dev/null || echo "0")
+            TOTAL_COMPONENT_TYPES=$(grep -c "<types>" delta/package/package.xml 2>/dev/null) || TOTAL_COMPONENT_TYPES=0
             
             if [ "$TOTAL_COMPONENT_TYPES" -gt 0 ]; then
               echo "✅ Salesforce/Vlocity Components Detected: YES" >> email_content.txt

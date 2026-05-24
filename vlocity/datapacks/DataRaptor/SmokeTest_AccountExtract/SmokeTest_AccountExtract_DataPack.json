@@ -1,0 +1,8 @@
+{
+  "VlocityDataPackType": "SObject",
+  "VlocityRecordSObjectType": "%vlocity_namespace%__DRBundle__c",
+  "Name": "SmokeTest_AccountExtract",
+  "%vlocity_namespace%__Type__c": "Extract",
+  "%vlocity_namespace%__InterfaceObjectAPIName__c": "Account",
+  "%vlocity_namespace%__Description__c": "Smoke-test DataRaptor used to exercise the GitHub Actions Vlocity deploy pipeline."
+}
