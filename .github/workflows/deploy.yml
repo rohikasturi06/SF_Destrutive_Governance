@@ -467,6 +467,29 @@ jobs:
             echo "No deployable delta; skipping."
           fi
 
+      # STAGE: VLOCITY / OMNISTUDIO PACK DEPLOY
+      # GitHub Actions equivalent of the Jenkins `vlocityDeploy()` step.
+      # Runs ONLY after the SF core deploy succeeds (so dependencies SF metadata
+      # provides are already in place). Self-skips when no Vlocity files were
+      # part of the delta. On packDeploy failure the script automatically
+      # retries with packRetry once before giving up — exactly like the
+      # Jenkins shared library.
+      - name: Vlocity Pack Deploy to ${{ env.ORG_NAME }}
+        id: vlocity-deploy
+        if: success() && env.HAS_ORG_AUTH != 'false'
+        env:
+          FROM_REF: ${{ steps.determine-baseline.outputs.from_ref }}
+          TO_REF: ${{ steps.determine-baseline.outputs.to_ref }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Prefer a dedicated Vlocity SFDX auth URL when configured;
+          # the script falls back to the org alias already authenticated
+          # by scripts/authenticate.sh when this secret is empty.
+          VLOCITY_SF_AUTH_URL: ${{ env.ORG_NAME == 'dev' && secrets.DEV_VLOCITY_SF_AUTH_URL
+                                || env.ORG_NAME == 'qa'  && secrets.QA_VLOCITY_SF_AUTH_URL
+                                || env.ORG_NAME == 'intuat' && secrets.INTUAT_VLOCITY_SF_AUTH_URL
+                                || '' }}
+        run: ./scripts/vlocity_deploy.sh
+
       - name: Clean up failed delta artifacts after successful deployment
         if: success() && env.HAS_DEPLOYMENT_PACKAGE == 'true'
         env:
