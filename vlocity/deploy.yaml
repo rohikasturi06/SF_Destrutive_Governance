@@ -17,18 +17,18 @@
 # ==============================================================================
 
 # ---------------- Project / source locations -----------------------------------
-# Root directory containing exported Vlocity datapacks. The build tool will scan
-# this folder for *.json / *.yaml metadata and matching artifact files.
+# Single-source-of-truth contract:
+#   ALL Vlocity / OmniStudio datapacks for this repo live under the top-level
+#   `vlocity/` folder. Nothing under `force-app/` is treated as Vlocity content
+#   — OmniStudio source-format files there are handled by the standard SF CLI
+#   deploy path. See scripts/_vlocity_lib.sh::detect_vlocity_changes.
 #
-# The active workflow generates a delta in `delta/force-app`. Vlocity datapacks
-# in this repo also live under `force-app/main/default/` (omniIntegrationProcedures,
-# omniDataTransforms, omniScripts, dataPacks, etc.). The build tool understands
-# both source-format and datapack-format folders.
+# `projectPath` is the root folder the build tool scans for *.json / *.yaml
+# datapack metadata. Place new datapacks under `vlocity/datapacks/<Type>/...`.
 projectPath: ./vlocity/datapacks
 
-# Some repositories also keep an exported datapack folder named `vlocity`.
 # `expansionPath` is where the build tool writes/reads the expanded datapack
-# representation (one folder per pack).
+# representation (one folder per pack). Relative to projectPath.
 expansionPath: .
 
 # ---------------- Deployment behavior ------------------------------------------
@@ -61,8 +61,9 @@ simpleLogging: true
 
 # ---------------- Manifest -----------------------------------------------------
 # Empty manifest means "everything under projectPath". The pipeline scopes the
-# deploy by *which files are present* in delta/vlocity rather than by manifest
-# entries, so leaving this empty keeps the job generic across environments.
+# deploy by *which files in vlocity/ changed in the delta* (see
+# scripts/_vlocity_lib.sh) rather than by manifest entries, so leaving this
+# empty keeps the job generic across environments.
 #
 # To restrict a deploy, list pack names here, e.g.:
 #   manifest:

@@ -22,33 +22,24 @@ fi
 __VLOCITY_LIB_LOADED=1
 
 # Defaults (callers may override via env)
+: "${VLOCITY_ROOT:=vlocity}"
 : "${VLOCITY_JOB_FILE:=vlocity/deploy.yaml}"
 : "${VLOCITY_PROJECT_PATH:=vlocity/datapacks}"
 : "${VLOCITY_REPORTS_DIR:=reports/vlocity}"
 : "${VLOCITY_RETRY_LIMIT:=1}"
 
-# Vlocity / OmniStudio metadata extensions and directories that should trigger
-# a Vlocity deploy when they appear in a git diff. These mirror the Jenkins
-# `changes()` function which watches for files under:
-#   force-app/main/default/src-base/commscloud/vlocity
-#   force-app/main/default/src-base/prm/vlocity
-# while also accepting the source-format OmniStudio folders this repo uses.
-VLOCITY_FILE_PATTERNS=(
-  '*.oip-meta.xml'        # OmniIntegrationProcedure
-  '*.omniscript-meta.xml' # OmniScript
-  '*.rpt-meta.xml'        # OmniDataTransform / Report metadata
-  '*.dataPack'            # raw Vlocity datapack
-)
-
-VLOCITY_DIR_PATTERNS=(
-  'force-app/main/default/omniIntegrationProcedures'
-  'force-app/main/default/omniDataTransforms'
-  'force-app/main/default/omniScripts'
-  'force-app/main/default/omniDataMappings'
-  'force-app/main/default/src-base/commscloud/vlocity'
-  'force-app/main/default/src-base/prm/vlocity'
-  'vlocity/datapacks'
-)
+# Single-folder contract:
+#   The Vlocity deploy is triggered **only** when files inside the top-level
+#   `vlocity/` folder change. Everything else (including OmniStudio source-
+#   format files under force-app/main/default/omni*) is treated as standard
+#   Salesforce metadata and deployed via the SF CLI path.
+#
+#   This is intentionally narrower than the legacy Jenkins detector — keeping
+#   the trigger surface tight prevents accidental Vlocity Build Tool runs when
+#   only standard metadata changes.
+#
+# To extend, override VLOCITY_ROOT via env (rarely needed):
+#   VLOCITY_ROOT=my-vlocity-folder ./scripts/vlocity_deploy.sh
 
 # ------------------------------------------------------------------------------
 # vlocity_log <message>
@@ -66,9 +57,13 @@ vlocity_log() {
 #   VLOCITY_CHANGED_COUNT integer
 #   VLOCITY_CHANGED_LIST  newline-separated file list
 #
+# Detection rule: a Vlocity deploy is triggered IFF at least one file under
+# the top-level `${VLOCITY_ROOT}/` folder changed (added, modified, renamed,
+# or had its type changed). Nothing outside that folder can trigger a Vlocity
+# run — even OmniStudio source-format files in force-app/.
+#
 # When FROM/TO refs are not provided, falls back to comparing the current HEAD
-# against the merge-base of origin/<TARGET_BRANCH>, which matches the behavior
-# of generate_delta.sh in this repo.
+# against origin/<TARGET_BRANCH>, which matches the behavior of generate_delta.sh.
 # ------------------------------------------------------------------------------
 detect_vlocity_changes() {
   local from_ref="${1:-${FROM_REF:-}}"
@@ -88,15 +83,6 @@ detect_vlocity_changes() {
     fi
   fi
 
-  # Build a single grep pattern from VLOCITY_DIR_PATTERNS / VLOCITY_FILE_PATTERNS.
-  local dir_regex file_regex
-  dir_regex=$(printf '%s|' "${VLOCITY_DIR_PATTERNS[@]}")
-  dir_regex="${dir_regex%|}"
-  file_regex=$(printf '%s|' "${VLOCITY_FILE_PATTERNS[@]}")
-  file_regex="${file_regex%|}"
-  # Convert glob asterisks to regex .*  (we only use *.ext patterns)
-  file_regex="${file_regex//\*/.*}"
-
   local diff_files
   diff_files=$(git diff --name-only --diff-filter=ACMRT "$from_ref" "$to_ref" 2>/dev/null || true)
 
@@ -104,9 +90,13 @@ detect_vlocity_changes() {
     return 0
   fi
 
+  # Anchor at the start of the path: a file is a Vlocity change iff its path
+  # begins with "${VLOCITY_ROOT}/". This means scripts/vlocity_*.sh (which
+  # *contain* the word "vlocity") will NOT trigger a Vlocity deploy — only
+  # files actually inside the vlocity folder do.
   local matched
   matched=$(printf '%s\n' "$diff_files" \
-    | grep -E "(${dir_regex})/|(${file_regex})$" \
+    | grep -E "^${VLOCITY_ROOT}/" \
     || true)
 
   if [ -n "$matched" ]; then
