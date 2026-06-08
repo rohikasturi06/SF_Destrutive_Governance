@@ -139,13 +139,20 @@ fi
 # 6) Write a machine-readable summary so the executive summary email/PR
 #    comment can pick it up.
 # ------------------------------------------------------------------------------
+# NB: VLOCITY_CHANGED_LIST can contain thousands of paths. Passing it as a
+# single `--arg` exceeds Linux's per-argument limit (MAX_ARG_STRLEN, 128KB) and
+# fails with "Argument list too long". Stage it in a temp file and read it with
+# --rawfile, which has no such limit.
+CHANGED_LIST_FILE="$(mktemp)"
+printf '%s' "${VLOCITY_CHANGED_LIST:-}" > "$CHANGED_LIST_FILE"
+
 jq -nc \
-  --arg status   "$DEPLOY_STATUS" \
-  --arg env      "$VLOCITY_ENV_NAME" \
-  --arg user     "$SF_USERNAME" \
-  --arg jobFile  "$JOB_FILE" \
-  --arg files    "${VLOCITY_CHANGED_LIST:-}" \
-  --argjson rc   "$DEPLOY_RC" \
+  --arg status     "$DEPLOY_STATUS" \
+  --arg env        "$VLOCITY_ENV_NAME" \
+  --arg user       "$SF_USERNAME" \
+  --arg jobFile    "$JOB_FILE" \
+  --rawfile files  "$CHANGED_LIST_FILE" \
+  --argjson rc     "$DEPLOY_RC" \
   '{
      result: {
        status:        $status,
@@ -157,6 +164,8 @@ jq -nc \
      }
    }' \
   > "${VLOCITY_REPORTS_DIR}/summary.json"
+
+rm -f "$CHANGED_LIST_FILE"
 
 # ------------------------------------------------------------------------------
 # 7) Update GitHub Deployment status to terminal state.
