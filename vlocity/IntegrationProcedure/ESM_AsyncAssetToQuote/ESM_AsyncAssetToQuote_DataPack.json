@@ -1,0 +1,30 @@
+{
+    "%vlocity_namespace%__AdditionalInformation__c": "This IP performs async asset to quote flow.",
+    "%vlocity_namespace%__CustomJavaScript__c": "ESM_AsyncAssetToQuote_SampleInput.json",
+    "%vlocity_namespace%__DisableMetadataCache__c": false,
+    "%vlocity_namespace%__ElementTypeToHTMLTemplateList__c": "{\"ElementTypeToHTMLTemplateList\":[]}",
+    "%vlocity_namespace%__Element__c": [
+        "ESM_AsyncAssetToQuote_Element_SetUserId.json",
+        "ESM_AsyncAssetToQuote_Element_GetExistingAssetsFromQuoteLineItem.json",
+        "ESM_AsyncAssetToQuote_Element_GetAssetIdsToProcess.json",
+        "ESM_AsyncAssetToQuote_Element_SetDuplicateAssetsErrorMessage.json",
+        "ESM_AsyncAssetToQuote_Element_StartAsyncJob.json",
+        "ESM_AsyncAssetToQuote_Element_sendNotificationStarted.json",
+        "ESM_AsyncAssetToQuote_Element_sendNotificationFailedToStart.json",
+        "ESM_AsyncAssetToQuote_Element_Response.json"
+    ],
+    "%vlocity_namespace%__IsLwcEnabled__c": false,
+    "%vlocity_namespace%__IsProcedure__c": true,
+    "%vlocity_namespace%__IsReusable__c": false,
+    "%vlocity_namespace%__IsTest__c": false,
+    "%vlocity_namespace%__Language__c": "Procedure",
+    "%vlocity_namespace%__OmniProcessType__c": "Integration Procedure",
+    "%vlocity_namespace%__ProcedureKey__c": "ESM_AsyncAssetToQuote",
+    "%vlocity_namespace%__PropertySet__c": "ESM_AsyncAssetToQuote_PropertySet.json",
+    "%vlocity_namespace%__SubType__c": "AsyncAssetToQuote",
+    "%vlocity_namespace%__Type__c": "ESM",
+    "Name": "ESM_AsyncAssetToQuote",
+    "VlocityDataPackType": "SObject",
+    "VlocityRecordSObjectType": "%vlocity_namespace%__OmniScript__c",
+    "VlocityRecordSourceKey": "%vlocity_namespace%__OmniScript__c/ESM/AsyncAssetToQuote/Procedure"
+}

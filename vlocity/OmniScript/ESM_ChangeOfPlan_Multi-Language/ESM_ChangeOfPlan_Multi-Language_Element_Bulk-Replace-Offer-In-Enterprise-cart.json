@@ -1,0 +1,101 @@
+{
+    "%vlocity_namespace%__Active__c": true,
+    "%vlocity_namespace%__OmniScriptId__c": {
+        "Name": "Change Of Plan",
+        "VlocityDataPackType": "VlocityMatchingKeyObject",
+        "VlocityMatchingRecordSourceKey": "%vlocity_namespace%__OmniScript__c/ESM/ChangeOfPlan/Multi-Language",
+        "VlocityRecordSObjectType": "%vlocity_namespace%__OmniScript__c"
+    },
+    "%vlocity_namespace%__PropertySet__c": {
+        "HTMLTemplateId": "",
+        "businessCategory": "",
+        "businessEvent": "",
+        "controlWidth": 12,
+        "enableActionMessage": false,
+        "enableDefaultAbort": false,
+        "errorMessage": {
+            "custom": [
+            ],
+            "default": ""
+        },
+        "extraPayload": {
+            "additionalData": {
+                "cartId": "%cartId%",
+                "cartName": "%cartName%",
+                "cartType": "%cartType%",
+                "groupCartId": "%GroupCartId%",
+                "sourceItemsToProcessList": "%selectedRootItemsList%",
+                "sourceOfferName": "%sourceOfferName%",
+                "targetOfferId": "%selectedNewOfferPBEId%",
+                "targetOfferName": "%targetOfferName%",
+                "userID": "%userID%",
+                "userIntent": "%userIntent%"
+            },
+            "itemsToProcessList": "%selectedRootItemsList%"
+        },
+        "failureAbortLabel": "",
+        "failureAbortMessage": "",
+        "failureGoBackLabel": "",
+        "failureNextLabel": "",
+        "inProgressMessage": "",
+        "integrationProcedureKey": "ESM_StartBulkReplace",
+        "label": "",
+        "message": {
+        },
+        "postMessage": "Done",
+        "postTransformBundle": "",
+        "preTransformBundle": "",
+        "pubsub": false,
+        "redirectNextLabel": "",
+        "redirectNextWidth": 3,
+        "redirectPageName": "",
+        "redirectPreviousLabel": "",
+        "redirectPreviousWidth": 3,
+        "redirectTemplateUrl": "vlcAcknowledge.html",
+        "remoteOptions": {
+            "chainable": false,
+            "postTransformBundle": "",
+            "preTransformBundle": "",
+            "useFuture": false
+        },
+        "remoteTimeout": 30000,
+        "responseJSONNode": "",
+        "responseJSONPath": "",
+        "sendJSONNode": "",
+        "sendJSONPath": "",
+        "sendOnlyExtraPayload": true,
+        "show": {
+            "group": {
+                "operator": "AND",
+                "rules": [
+                    {
+                        "condition": "=",
+                        "data": "bulk",
+                        "field": "changeOfPlanVariant"
+                    },
+                    {
+                        "condition": "=",
+                        "data": "false",
+                        "field": "isMergeFlow"
+                    }
+                ]
+            }
+        },
+        "showPersistentComponent": [
+            true,
+            false
+        ],
+        "ssm": false,
+        "svgIcon": "",
+        "svgSprite": "",
+        "useContinuation": false,
+        "validationRequired": "Step",
+        "wpm": false
+    },
+    "%vlocity_namespace%__ReusableOmniScript__c": false,
+    "%vlocity_namespace%__Type__c": "Integration Procedure Action",
+    "Name": "Bulk Replace Offer In Enterprise cart",
+    "VlocityDataPackType": "SObject",
+    "VlocityRecordSObjectType": "%vlocity_namespace%__Element__c",
+    "VlocityRecordSourceKey": "%vlocity_namespace%__Element__c/%vlocity_namespace%__OmniScript__c/ESM/ChangeOfPlan/Multi-Language/Bulk Replace Offer In Enterprise cart"
+}
