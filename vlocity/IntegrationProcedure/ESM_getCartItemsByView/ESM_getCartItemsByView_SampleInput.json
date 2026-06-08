@@ -1,0 +1,13 @@
+{
+    "cartId": "0Q0Hs000002etM4KAI",
+    "include": "count,defaultFields,productRelationships",
+    "lineItemIds": [
+        "0QLHs0000070TlIOAU",
+        "0QLHs0000070TlSOAU"
+    ],
+    "offset": "0",
+    "pageSize": "10",
+    "searchByFields": "Product2.Name,%vlocity_namespace%__QuoteMemberId__r.Name,%vlocity_namespace%__QuoteMemberId__r.%vlocity_namespace%__StreetAddress__c,%vlocity_namespace%__QuoteMemberId__r.%vlocity_namespace%__State__c,%vlocity_namespace%__QuoteMemberId__r.%vlocity_namespace%__City__c,%vlocity_namespace%__QuoteGroupId__r.Name,%vlocity_namespace%__BillingAccountId__r.Name",
+    "searchText": "",
+    "sortByField": ""
+}
