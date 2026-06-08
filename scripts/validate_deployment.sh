@@ -184,7 +184,7 @@ if has_any_deployable; then
   # Direct link to the org's Deployment Status page for fast triage.
   # ----------------------------------------------------------------------------
   if command -v jq >/dev/null 2>&1; then
-    ORG_URL=$(sf org display --target-org "${ORG_NAME:-sandbox}" --json 2>/dev/null | jq -r '.result.instanceUrl // empty')
+    ORG_URL=$(sf org display --target-org "${ORG_NAME:-sandbox}" --json 2>/dev/null | jq -r '.result.instanceUrl // empty' || true)
     DEPLOY_ID=$(jq -r '.result.id // empty' reports/deploy-report.json 2>/dev/null || echo "")
     if [ -n "$ORG_URL" ]; then
       echo "🔗 View in org: ${ORG_URL}/lightning/setup/DeployStatus/home"

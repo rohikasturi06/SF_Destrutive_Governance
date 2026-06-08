@@ -95,16 +95,30 @@ jobs:
         if: env.HAS_ORG_AUTH == 'true'
         run: |
           echo "🔐 Authenticating to QA Salesforce Org..."
-          sf org login sfdx-url --sfdx-url-file <(echo "${{ secrets.QA_SF_AUTH_URL }}") --alias qa --set-default 2>/dev/null || true
-          
-          # Get org info without exposing sensitive details
+          # Fail fast if the auth URL itself is rejected by the CLI.
+          if ! sf org login sfdx-url --sfdx-url-file <(echo "${{ secrets.QA_SF_AUTH_URL }}") --alias qa --set-default 2>/tmp/sf-login.err; then
+            echo "❌ sf org login failed — QA_SF_AUTH_URL is invalid, expired, or malformed."
+            echo "   Regenerate it with: sf org display --target-org <qa-org> --verbose --json | jq -r '.result.sfdxAuthUrl'"
+            sed 's/^/   /' /tmp/sf-login.err 2>/dev/null || true
+            exit 1
+          fi
+
+          # Confirm the org is actually reachable before downstream steps trust it.
           ORG_INFO=$(sf org display --target-org qa --json 2>/dev/null || echo '{}')
-          ORG_NAME=$(echo "$ORG_INFO" | jq -r '.result.username // "Unknown"')
-          INSTANCE_URL=$(echo "$ORG_INFO" | jq -r '.result.instanceUrl // "Unknown"')
-          
+          ORG_USER=$(echo "$ORG_INFO" | jq -r '.result.username // empty')
+          INSTANCE_URL=$(echo "$ORG_INFO" | jq -r '.result.instanceUrl // empty')
+          CONNECTED=$(echo "$ORG_INFO" | jq -r '.result.connectedStatus // empty')
+
+          if [ -z "$ORG_USER" ] || [ -z "$INSTANCE_URL" ]; then
+            echo "❌ Authentication did not produce a usable QA org (username/instance came back empty)."
+            echo "   This usually means QA_SF_AUTH_URL points to an expired or deleted org. Regenerate the secret."
+            exit 1
+          fi
+
           echo "✅ Successfully authenticated to QA org"
-          echo "   • Org: $ORG_NAME"
+          echo "   • Org: $ORG_USER"
           echo "   • Instance: $INSTANCE_URL"
+          echo "   • Status: ${CONNECTED:-Unknown}"
 
       # STAGE 3: DELTA GENERATION AND ANALYSIS
 
