@@ -308,10 +308,25 @@ build_vlocity_delta_project() {
 
   # Generate the temp job file: copy the base job but drop projectPath/manifest,
   # then point projectPath at the temp project (no manifest = deploy everything
-  # staged there).
+  # staged there). If the base job file is missing (e.g. it was removed from the
+  # repo), fall back to safe CI defaults so the deploy can still run.
   local job_out="${tmp_root}/deploy.delta.yaml"
-  if ! grep -vE '^[[:space:]]*(projectPath|manifest):' "$base_job" > "$job_out" 2>/dev/null; then
-    cp "$base_job" "$job_out"
+  if [ -f "$base_job" ]; then
+    grep -vE '^[[:space:]]*(projectPath|manifest):' "$base_job" > "$job_out" 2>/dev/null || true
+  else
+    vlocity_log "Base job file '${base_job}' not found — using built-in delta defaults"
+    {
+      echo "expansionPath: ."
+      echo "continueAfterError: true"
+      echo "autoUpdateSettings: true"
+      echo "defaultMaxParallel: 10"
+      echo "maxDepth: -1"
+      echo "activate: true"
+      echo "compileLwc: true"
+      echo "ignoreAllErrors: false"
+      echo "verbose: true"
+      echo "simpleLogging: true"
+    } > "$job_out"
   fi
   {
     echo ""
