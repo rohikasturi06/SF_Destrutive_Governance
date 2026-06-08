@@ -1,0 +1,44 @@
+{
+    "additionalData": {
+        "cartId": "0Q0Dn000001fJatKAE",
+        "cartType": "Quote",
+        "configurationDetail": {
+            "01tDn0000051xNIIAY<01tDn0000051xMSIAY<01tDn0000051xLsIAI": {
+                "cartConfiguration": [
+                    {
+                        "target": [
+                            {
+                                "bulkAction": "UPDATE",
+                                "isParent": "false",
+                                "parentHierarchyPath": "01tDn0000051xNIIAY<01tDn0000051xMSIAY",
+                                "productCode": "VPL_iPhone11Pro",
+                                "productHierarchyPath": "01tDn0000051xNIIAY<01tDn0000051xMSIAY<01tDn0000051xLsIAI",
+                                "productName": "iPhone 11 Pro",
+                                "productPbeId": "01uDn000002ZVaLIAW"
+                            }
+                        ]
+                    }
+                ]
+            }
+        },
+        "rootIds": [
+            "4a9f9eb3-c9fa-b69a-50f1-e927ca2f4c52",
+            "777322f9-7a66-2b72-2a53-b09398270756"
+        ]
+    },
+    "itemsToProcessSubsetList": [
+        {
+            "attributes": {
+                "labelValues": {
+                    "Handset Color": "Black",
+                    "Handset Storage Capacity": "128"
+                },
+                "newValues": {
+                    "VPL_ATTR_HANDSET_STORAGE_CAPACITY": "128",
+                    "VPL_PICKLIST_HANDSET_COLOR": "Black"
+                }
+            },
+            "id": "01tDn0000051xNIIAY<01tDn0000051xMSIAY<01tDn0000051xLmIAI#777322f9-7a66-2b72-2a53-b09398270756"
+        }
+    ]
+}

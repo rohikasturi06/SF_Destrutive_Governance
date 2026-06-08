@@ -1,0 +1,11 @@
+**/jsconfig.json
+**/.eslintrc.json
+
+# ------------------------------------------------------------------------------
+# Vlocity / OmniStudio datapacks live OUTSIDE force-app/ on purpose.
+# The top-level vlocity/ folder is owned by the Vlocity Build Tool
+# (see vlocity/deploy.yaml + scripts/vlocity_deploy.sh). Excluding it from
+# the SF CLI keeps `sf project deploy` and sfdx-git-delta from trying to
+# pack legacy datapack JSON files as standard Salesforce metadata.
+# ------------------------------------------------------------------------------
+vlocity/

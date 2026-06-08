@@ -1,0 +1,28 @@
+{
+    "%vlocity_namespace%__AdditionalInformation__c": "Omniscript to change an asset to quote for landing on ESM cart",
+    "%vlocity_namespace%__DisableMetadataCache__c": false,
+    "%vlocity_namespace%__ElementTypeToHTMLTemplateList__c": "{\"ElementTypeToHTMLTemplateList\":[]}",
+    "%vlocity_namespace%__Element__c": [
+        "ESM_ChangeToQuote_Multi-Language_Element_GetExistingAssetsFromQuoteLineItem.json",
+        "ESM_ChangeToQuote_Multi-Language_Element_GetAssetIdsToProcess.json",
+        "ESM_ChangeToQuote_Multi-Language_Element_SetDuplicateAssetsErrorMessage.json",
+        "ESM_ChangeToQuote_Multi-Language_Element_ChangeToQuoteRemoteAction.json",
+        "ESM_ChangeToQuote_Multi-Language_Element_GetCartDetailsFromQuoteId.json",
+        "ESM_ChangeToQuote_Multi-Language_Element_SetCartDetails.json",
+        "ESM_ChangeToQuote_Multi-Language_Element_CreateLocation.json",
+        "ESM_ChangeToQuote_Multi-Language_Element_QuoteNavigateAction.json"
+    ],
+    "%vlocity_namespace%__IsLwcEnabled__c": true,
+    "%vlocity_namespace%__IsProcedure__c": false,
+    "%vlocity_namespace%__IsReusable__c": true,
+    "%vlocity_namespace%__IsTest__c": false,
+    "%vlocity_namespace%__Language__c": "Multi-Language",
+    "%vlocity_namespace%__OmniProcessType__c": "OmniScript",
+    "%vlocity_namespace%__PropertySet__c": "ESM_ChangeToQuote_Multi-Language_PropertySet.json",
+    "%vlocity_namespace%__SubType__c": "ChangeToQuote",
+    "%vlocity_namespace%__Type__c": "ESM",
+    "Name": "Change to Quote",
+    "VlocityDataPackType": "SObject",
+    "VlocityRecordSObjectType": "%vlocity_namespace%__OmniScript__c",
+    "VlocityRecordSourceKey": "%vlocity_namespace%__OmniScript__c/ESM/ChangeToQuote/Multi-Language"
+}

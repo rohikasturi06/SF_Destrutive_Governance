@@ -95,16 +95,30 @@ jobs:
         if: env.HAS_ORG_AUTH == 'true'
         run: |
           echo "🔐 Authenticating to Dev Salesforce Org..."
-          sf org login sfdx-url --sfdx-url-file <(echo "${{ secrets.DEV_SF_AUTH_URL }}") --alias dev --set-default 2>/dev/null || true
-          
-          # Get org info without exposing sensitive details
+          # Fail fast if the auth URL itself is rejected by the CLI.
+          if ! sf org login sfdx-url --sfdx-url-file <(echo "${{ secrets.DEV_SF_AUTH_URL }}") --alias dev --set-default 2>/tmp/sf-login.err; then
+            echo "❌ sf org login failed — DEV_SF_AUTH_URL is invalid, expired, or malformed."
+            echo "   Regenerate it with: sf org display --target-org <dev-org> --verbose --json | jq -r '.result.sfdxAuthUrl'"
+            sed 's/^/   /' /tmp/sf-login.err 2>/dev/null || true
+            exit 1
+          fi
+
+          # Confirm the org is actually reachable before downstream steps trust it.
           ORG_INFO=$(sf org display --target-org dev --json 2>/dev/null || echo '{}')
-          ORG_NAME=$(echo "$ORG_INFO" | jq -r '.result.username // "Unknown"')
-          INSTANCE_URL=$(echo "$ORG_INFO" | jq -r '.result.instanceUrl // "Unknown"')
-          
+          ORG_USER=$(echo "$ORG_INFO" | jq -r '.result.username // empty')
+          INSTANCE_URL=$(echo "$ORG_INFO" | jq -r '.result.instanceUrl // empty')
+          CONNECTED=$(echo "$ORG_INFO" | jq -r '.result.connectedStatus // empty')
+
+          if [ -z "$ORG_USER" ] || [ -z "$INSTANCE_URL" ]; then
+            echo "❌ Authentication did not produce a usable Dev org (username/instance came back empty)."
+            echo "   This usually means DEV_SF_AUTH_URL points to an expired or deleted org. Regenerate the secret."
+            exit 1
+          fi
+
           echo "✅ Successfully authenticated to Dev org"
-          echo "   • Org: $ORG_NAME"
+          echo "   • Org: $ORG_USER"
           echo "   • Instance: $INSTANCE_URL"
+          echo "   • Status: ${CONNECTED:-Unknown}"
 
       # STAGE 3: DELTA GENERATION AND ANALYSIS
 
@@ -150,7 +164,11 @@ jobs:
           DELTA_DESTRUCTIVE_COUNT=$(grep '^DESTRUCTIVE_MEMBER_COUNT=' "$GITHUB_ENV" 2>/dev/null | tail -n1 | cut -d= -f2- || echo "0")
 
           if [ -f "delta/package/package.xml" ]; then
-            COMPONENT_COUNT=$(grep -c "<types>" delta/package/package.xml 2>/dev/null || echo "0")
+            # `grep -c` prints "0" AND exits 1 when no matches, so the legacy
+            # `|| echo "0"` pattern produced the two-line string "0\n0", which
+            # then broke the `[ -gt 0 ]` integer test below. Capture stdout
+            # cleanly and fall back to 0 only if the command itself failed.
+            COMPONENT_COUNT=$(grep -c "<types>" delta/package/package.xml 2>/dev/null) || COMPONENT_COUNT=0
           else
             COMPONENT_COUNT=0
           fi
@@ -354,6 +372,12 @@ jobs:
             echo "success" > validation_result.txt
           fi
 
+      # NOTE: Vlocity / OmniStudio components are intentionally NOT validated on
+      # PRs. This mirrors the Jenkins pipeline, whose validate() step explicitly
+      # states "Vlocity Components are not validated as part of this deployment."
+      # Vlocity is deployed post-merge only, via scripts/vlocity_deploy.sh
+      # (packDeploy / packRetry) in deploy.yml.
+
       - name: Analyze Code Coverage for Delta Classes
         if: always()
         run: ./scripts/filter_coverage.sh
@@ -385,8 +409,12 @@ jobs:
               exit 1
               ;;
             *)
-              echo "❌ FAILED — validation step did not record a result (validation_result.txt missing/invalid)."
-              echo "   Inspect the previous step output for diagnostics."
+              echo "❌ FAILED — no quality-gate result was recorded (validation_result.txt missing)."
+              echo "   This means the validation step never ran — an earlier REQUIRED step failed first."
+              echo "   👉 Scroll up to the first ❌ step in this job. Most common causes:"
+              echo "      • Salesforce authentication failed (invalid/expired *_SF_AUTH_URL secret)"
+              echo "      • Salesforce Code Analyzer exceeded the severity threshold"
+              echo "      • Delta generation failed"
               exit 1
               ;;
           esac
@@ -427,7 +455,7 @@ jobs:
           # Check if we have Salesforce/Vlocity components by parsing SGD-generated package.xml
           if [ -f "delta/package/package.xml" ]; then
             # Count total component types in package.xml
-            TOTAL_COMPONENT_TYPES=$(grep -c "<types>" delta/package/package.xml 2>/dev/null || echo "0")
+            TOTAL_COMPONENT_TYPES=$(grep -c "<types>" delta/package/package.xml 2>/dev/null) || TOTAL_COMPONENT_TYPES=0
             
             if [ "$TOTAL_COMPONENT_TYPES" -gt 0 ]; then
               echo "✅ Salesforce/Vlocity Components Detected: YES" >> email_content.txt

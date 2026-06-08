@@ -1,0 +1,26 @@
+{
+    "additionalData": {
+        "AssetIds": [
+            "02iHs00000JpWabIAF",
+            "02iHs00000JpWaFIAV",
+            "02iHs00000JpWaQIAV",
+            "02iHs00000JpWamIAF",
+            "02iHs00000JprSFIAZ",
+            "02iHs00000Jprf7IAB",
+            "02iHs00000JpriAIAR"
+        ],
+        "QuoteId": "0Q0Hs000003NcZyKAK",
+        "accountId": "001Hs00003AE5DfIAL",
+        "isAsyncATQFlow": true,
+        "opportunityId": "006Hs00001Qc1s7IAB"
+    },
+    "itemsToProcessSubsetList": [
+        "02iHs00000JpWabIAF",
+        "02iHs00000JpWaFIAV",
+        "02iHs00000JpWaQIAV",
+        "02iHs00000JpWamIAF",
+        "02iHs00000JprSFIAZ",
+        "02iHs00000Jprf7IAB",
+        "02iHs00000JpriAIAR"
+    ]
+}
