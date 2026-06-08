@@ -24,8 +24,10 @@
 #   deploy path. See scripts/_vlocity_lib.sh::detect_vlocity_changes.
 #
 # `projectPath` is the root folder the build tool scans for *.json / *.yaml
-# datapack metadata. Place new datapacks under `vlocity/datapacks/<Type>/...`.
-projectPath: ./vlocity/datapacks
+# datapack metadata. The datapacks live directly under `vlocity/<Type>/...`
+# (e.g. vlocity/DataRaptor/, vlocity/IntegrationProcedure/, vlocity/OmniScript/),
+# so projectPath must be the `vlocity/` root itself.
+projectPath: ./vlocity
 
 # `expansionPath` is where the build tool writes/reads the expanded datapack
 # representation (one folder per pack). Relative to projectPath.
