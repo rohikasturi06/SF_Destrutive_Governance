@@ -423,8 +423,12 @@ jobs:
               exit 1
               ;;
             *)
-              echo "❌ FAILED — validation step did not record a result (validation_result.txt missing/invalid)."
-              echo "   Inspect the previous step output for diagnostics."
+              echo "❌ FAILED — no quality-gate result was recorded (validation_result.txt missing)."
+              echo "   This means the validation step never ran — an earlier REQUIRED step failed first."
+              echo "   👉 Scroll up to the first ❌ step in this job. Most common causes:"
+              echo "      • Salesforce authentication failed (invalid/expired *_SF_AUTH_URL secret)"
+              echo "      • Salesforce Code Analyzer exceeded the severity threshold"
+              echo "      • Delta generation failed"
               exit 1
               ;;
           esac
