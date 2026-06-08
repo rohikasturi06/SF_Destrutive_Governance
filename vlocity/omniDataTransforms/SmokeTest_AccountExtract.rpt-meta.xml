@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<OmniDataTransform xmlns="http://soap.sforce.com/2006/04/metadata">
-    <name>SmokeTest_AccountExtract</name>
-    <type>Extract</type>
-    <inputType>JSON</inputType>
-    <outputType>JSON</outputType>
-    <description>Smoke-test Data Mapper used to exercise the GitHub Actions OmniStudio deploy pipeline.</description>
-    <active>true</active>
-</OmniDataTransform>
