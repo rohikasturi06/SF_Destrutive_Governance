@@ -1,0 +1,76 @@
+# ==============================================================================
+# Vlocity Build Tool Job Configuration
+# ==============================================================================
+# Used by `vlocity packDeploy` / `vlocity packRetry` to deploy OmniStudio
+# (Vlocity) datapacks into the target Salesforce org.
+#
+# This is the GitHub Actions equivalent of the `deploy.yaml` consumed by the
+# Jenkins `vlocityDeploy()` shared-library step:
+#
+#     vlocity -job deploy.yaml packDeploy --verbose true --simpleLogging true
+#
+# The Vlocity Build Tool reads this YAML to discover which packs to deploy,
+# from where, and with which behavior toggles.
+#
+# References:
+#   https://github.com/vlocityinc/vlocity_build
+# ==============================================================================
+
+# ---------------- Project / source locations -----------------------------------
+# Single-source-of-truth contract:
+#   ALL Vlocity / OmniStudio datapacks for this repo live under the top-level
+#   `vlocity/` folder. Nothing under `force-app/` is treated as Vlocity content
+#   — OmniStudio source-format files there are handled by the standard SF CLI
+#   deploy path. See scripts/_vlocity_lib.sh::detect_vlocity_changes.
+#
+# `projectPath` is the root folder the build tool scans for *.json / *.yaml
+# datapack metadata. The datapacks live directly under `vlocity/<Type>/...`
+# (e.g. vlocity/DataRaptor/, vlocity/IntegrationProcedure/, vlocity/OmniScript/),
+# so projectPath must be the `vlocity/` root itself.
+projectPath: ./vlocity
+
+# `expansionPath` is where the build tool writes/reads the expanded datapack
+# representation (one folder per pack). Relative to projectPath.
+expansionPath: .
+
+# ---------------- Deployment behavior ------------------------------------------
+# Continue when a pack fails so we can collect ALL errors in one run; the retry
+# loop in scripts/vlocity_deploy.sh handles re-running just the failed packs.
+continueAfterError: true
+
+# Vlocity has many "AllTriggers/Compilation" knobs. These match the safe
+# defaults recommended for non-prod CI deployments.
+autoUpdateSettings: true
+defaultMaxParallel: 10
+maxDepth: -1
+
+# Activate datapacks after deploy (matches `packDeploy` behavior in Jenkins).
+activate: true
+
+# Compile LWC OmniScripts during deploy. Puppeteer is required for the headless
+# compile step. The workflow installs/uninstalls puppeteer depending on the
+# target environment (see scripts/vlocity_deploy.sh).
+compileLwc: true
+
+# Skip Salesforce-side validation rules that frequently conflict with managed
+# Vlocity metadata; safer when promoting between sandboxes.
+ignoreAllErrors: false
+
+# Show full per-pack progress in the log (matches `--verbose true` /
+# `--simpleLogging true` flags Jenkins passes on the CLI).
+verbose: true
+simpleLogging: true
+
+# ---------------- Manifest -----------------------------------------------------
+# Empty manifest means "everything under projectPath". The pipeline scopes the
+# deploy by *which files in vlocity/ changed in the delta* (see
+# scripts/_vlocity_lib.sh) rather than by manifest entries, so leaving this
+# empty keeps the job generic across environments.
+#
+# To restrict a deploy, list pack names here, e.g.:
+#   manifest:
+#     OmniScript:
+#       - MyNamespace_MyOmniScript_English
+#     IntegrationProcedure:
+#       - MyNamespace_MyProcedure
+manifest: []

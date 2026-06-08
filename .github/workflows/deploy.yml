@@ -385,11 +385,15 @@ jobs:
                     echo "📊 COMPONENT DEPLOYMENT SUMMARY:"
                     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
                     
-                    # Extract component types and members
-                    COMPONENT_TYPES=$(grep -o '<name>[^<]*</name>' delta/package/package.xml | sed 's/<name>//g' | sed 's/<\/name>//g' | sort | uniq)
+                    # Extract component types and members. NB: a destructive-only
+                    # deploy produces an additive package.xml with no <name> entries,
+                    # so grep finds nothing and exits 1 — which would abort this step
+                    # under `set -euo pipefail` even though the deploy succeeded.
+                    # The `|| true` keeps the cosmetic summary non-fatal.
+                    COMPONENT_TYPES=$(grep -o '<name>[^<]*</name>' delta/package/package.xml | sed 's/<name>//g' | sed 's/<\/name>//g' | sort | uniq || true)
                     
                     for COMP_TYPE in $COMPONENT_TYPES; do
-                      MEMBERS=$(grep -A 1 "<name>$COMP_TYPE</name>" delta/package/package.xml | grep '<members>' | sed 's/<members>//g' | sed 's/<\/members>//g' | sed 's/^[[:space:]]*//')
+                      MEMBERS=$(grep -A 1 "<name>$COMP_TYPE</name>" delta/package/package.xml | grep '<members>' | sed 's/<members>//g' | sed 's/<\/members>//g' | sed 's/^[[:space:]]*//' || true)
                       MEMBER_COUNT=$(echo "$MEMBERS" | grep -c . 2>/dev/null || echo "0")
                       echo "   🔧 $COMP_TYPE: $MEMBER_COUNT component(s)"
                       if [ -n "$MEMBERS" ]; then
