@@ -78,6 +78,27 @@ if [ "${HAS_VLOCITY_CHANGES:-false}" != "true" ]; then
 fi
 
 # ------------------------------------------------------------------------------
+# 1b) Stage ONLY the changed datapacks into a temp project (delta deploy).
+#     If the delta touched only non-datapack files (e.g. deploy.yaml itself),
+#     there is nothing to deploy — skip cleanly.
+# ------------------------------------------------------------------------------
+build_vlocity_delta_project "${VLOCITY_CHANGED_LIST:-}" "$JOB_FILE"
+
+if [ "${VLOCITY_DELTA_PACK_COUNT:-0}" -eq 0 ]; then
+  vlocity_log "No datapack folders in delta (only non-datapack vlocity files changed) — nothing to deploy"
+  jq -nc \
+    --arg status "Skipped" \
+    --arg reason "Vlocity files changed but no datapack folders (vlocity/<Type>/<Name>/) were affected" \
+    '{result:{status:$status, message:$reason}}' \
+    > "${VLOCITY_REPORTS_DIR}/summary.json"
+  echo "✅ STAGE COMPLETED: Vlocity deploy skipped (no datapacks in delta)"
+  exit 0
+fi
+
+DEPLOY_JOB_FILE="$VLOCITY_DELTA_JOB_FILE"
+vlocity_log "Delta deploy: ${VLOCITY_DELTA_PACK_COUNT} changed datapack(s) staged → ${VLOCITY_DELTA_PROJECT_DIR}"
+
+# ------------------------------------------------------------------------------
 # 2) Install Vlocity CLI + configure puppeteer per target env.
 # ------------------------------------------------------------------------------
 install_vlocity_cli
@@ -128,7 +149,7 @@ fi
 # 5) Run packDeploy → packRetry (mirrors Jenkins retry semantics exactly).
 # ------------------------------------------------------------------------------
 DEPLOY_RC=0
-if vlocity_deploy_with_retry "$SF_USERNAME" "$JOB_FILE"; then
+if vlocity_deploy_with_retry "$SF_USERNAME" "$DEPLOY_JOB_FILE"; then
   DEPLOY_STATUS="Succeeded"
 else
   DEPLOY_RC=$?
@@ -153,19 +174,23 @@ jq -nc \
   --arg jobFile    "$JOB_FILE" \
   --rawfile files  "$CHANGED_LIST_FILE" \
   --argjson rc     "$DEPLOY_RC" \
+  --argjson packs  "${VLOCITY_DELTA_PACK_COUNT:-0}" \
   '{
      result: {
-       status:        $status,
-       returnCode:    $rc,
-       environment:   $env,
-       username:      $user,
-       jobFile:       $jobFile,
-       changedFiles:  ($files | split("\n") | map(select(length>0)))
+       status:          $status,
+       returnCode:      $rc,
+       environment:     $env,
+       username:        $user,
+       jobFile:         $jobFile,
+       deltaPackCount:  $packs,
+       changedFiles:    ($files | split("\n") | map(select(length>0)))
      }
    }' \
   > "${VLOCITY_REPORTS_DIR}/summary.json"
 
 rm -f "$CHANGED_LIST_FILE"
+# Clean up the staged delta project.
+[ -n "${VLOCITY_DELTA_TMP_ROOT:-}" ] && rm -rf "$VLOCITY_DELTA_TMP_ROOT"
 
 # ------------------------------------------------------------------------------
 # 7) Update GitHub Deployment status to terminal state.

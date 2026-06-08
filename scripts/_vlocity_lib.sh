@@ -250,6 +250,82 @@ run_vlocity_pack() {
 }
 
 # ------------------------------------------------------------------------------
+# build_vlocity_delta_project [changed-list] [base-job-file]
+# Builds a *temporary* Vlocity project containing ONLY the datapack folders that
+# changed in this delta, plus a matching temp job file that points at it. This
+# makes `packDeploy` deploy exactly the changed packs (delta deploy) instead of
+# the whole project — or, with an empty manifest, nothing at all.
+#
+# A datapack folder is the 3-segment path  ${VLOCITY_ROOT}/<Type>/<Name>/...
+# Files directly under ${VLOCITY_ROOT}/ (e.g. deploy.yaml) are NOT datapacks and
+# are ignored. The generated job file has NO manifest, so packDeploy deploys
+# everything staged in the temp project (= the changed packs).
+#
+# Sets globals:
+#   VLOCITY_DELTA_PACK_COUNT    number of datapack folders staged
+#   VLOCITY_DELTA_JOB_FILE      path to the generated temp job file ("" if none)
+#   VLOCITY_DELTA_PROJECT_DIR   path to the staged temp project dir ("" if none)
+#   VLOCITY_DELTA_TMP_ROOT      temp root to clean up ("" if none)
+# ------------------------------------------------------------------------------
+build_vlocity_delta_project() {
+  local changed_list="${1:-${VLOCITY_CHANGED_LIST:-}}"
+  local base_job="${2:-$VLOCITY_JOB_FILE}"
+
+  VLOCITY_DELTA_PACK_COUNT=0
+  VLOCITY_DELTA_JOB_FILE=""
+  VLOCITY_DELTA_PROJECT_DIR=""
+  VLOCITY_DELTA_TMP_ROOT=""
+
+  # Reduce changed files to unique datapack folders: <root>/<Type>/<Name>.
+  local packs
+  packs=$(printf '%s\n' "$changed_list" \
+    | awk -F/ -v root="$VLOCITY_ROOT" 'NF>=4 && $1==root {print $1"/"$2"/"$3}' \
+    | sort -u)
+
+  if [ -z "$packs" ]; then
+    return 0
+  fi
+
+  local tmp_root proj_dir
+  tmp_root="$(mktemp -d)"
+  proj_dir="${tmp_root}/project"
+  mkdir -p "$proj_dir"
+
+  local count=0 pack rel
+  while IFS= read -r pack; do
+    [ -z "$pack" ] && continue
+    [ -d "$pack" ] || continue
+    rel="${pack#"${VLOCITY_ROOT}"/}"           # <Type>/<Name>
+    mkdir -p "${proj_dir}/$(dirname "$rel")"
+    cp -R "$pack" "${proj_dir}/$(dirname "$rel")/"
+    count=$((count + 1))
+  done <<< "$packs"
+
+  if [ "$count" -eq 0 ]; then
+    rm -rf "$tmp_root"
+    return 0
+  fi
+
+  # Generate the temp job file: copy the base job but drop projectPath/manifest,
+  # then point projectPath at the temp project (no manifest = deploy everything
+  # staged there).
+  local job_out="${tmp_root}/deploy.delta.yaml"
+  if ! grep -vE '^[[:space:]]*(projectPath|manifest):' "$base_job" > "$job_out" 2>/dev/null; then
+    cp "$base_job" "$job_out"
+  fi
+  {
+    echo ""
+    echo "# --- Auto-generated for delta deploy (changed datapacks only) ---"
+    echo "projectPath: ${proj_dir}"
+  } >> "$job_out"
+
+  VLOCITY_DELTA_PACK_COUNT="$count"
+  VLOCITY_DELTA_JOB_FILE="$job_out"
+  VLOCITY_DELTA_PROJECT_DIR="$proj_dir"
+  VLOCITY_DELTA_TMP_ROOT="$tmp_root"
+}
+
+# ------------------------------------------------------------------------------
 # vlocity_deploy_with_retry <sf-username> [job-file]
 # Implements the Jenkins flow:
 #   1. packDeploy → if it fails…
