@@ -2,9 +2,9 @@
 # ==============================================================================
 # Shared Vlocity Build Helpers
 # ==============================================================================
-# Functions used by scripts/vlocity_deploy.sh and scripts/vlocity_validate.sh to
-# detect Vlocity / OmniStudio changes, authenticate the vlocity CLI to the
-# correct org, and run packDeploy with a packRetry fallback.
+# Functions used by scripts/vlocity_deploy.sh to detect Vlocity / OmniStudio
+# changes, authenticate the vlocity CLI to the correct org, and run packDeploy
+# with a packRetry fallback.
 #
 # This is the GitHub Actions equivalent of the Jenkins shared-library function:
 #

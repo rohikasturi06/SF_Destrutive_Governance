@@ -370,27 +370,11 @@ jobs:
             echo "success" > validation_result.txt
           fi
 
-      # STAGE 6.5: VLOCITY / OMNISTUDIO PR VALIDATION
-      # Mirrors the `vlocityDeploy` step from the Jenkins shared library, but in
-      # PR mode the build tool runs a connectivity / job-file check instead of
-      # an actual packDeploy. Self-skips when no Vlocity files changed.
-      - name: Vlocity PR Validation (INTUAT)
-        id: vlocity-validate
-        if: env.HAS_ORG_AUTH == 'true'
-        env:
-          TARGET_BRANCH: ${{ github.event.pull_request.base.ref || github.base_ref || github.ref_name }}
-          ORG_NAME: intuat
-          VLOCITY_SF_AUTH_URL: ${{ secrets.INTUAT_VLOCITY_SF_AUTH_URL }}
-        run: |
-          set +e
-          ./scripts/vlocity_validate.sh
-          RC=$?
-          set -e
-          if [ "$RC" -ne 0 ]; then
-            echo "❌ Vlocity validation failed (exit ${RC}); marking quality gate as failure"
-            echo "failure" > validation_result.txt
-            exit "$RC"
-          fi
+      # NOTE: Vlocity / OmniStudio components are intentionally NOT validated on
+      # PRs. This mirrors the Jenkins pipeline, whose validate() step explicitly
+      # states "Vlocity Components are not validated as part of this deployment."
+      # Vlocity is deployed post-merge only, via scripts/vlocity_deploy.sh
+      # (packDeploy / packRetry) in deploy.yml.
 
       - name: Analyze Code Coverage for Delta Classes
         if: always()
