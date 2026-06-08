@@ -1,0 +1,12 @@
+{
+    "additionalData": {
+        "cartId": "0Q0Hs000002oyQDKAY",
+        "cartType": "Quote",
+        "groupCartId": "0Q0Hs000002oyQIKAY",
+        "targetOfferId": "01uHs00000SeVtjIAF",
+        "userIntent": "Replace"
+    },
+    "itemsToProcessSubsetList": [
+        "0QLHs000007faFPOAY"
+    ]
+}

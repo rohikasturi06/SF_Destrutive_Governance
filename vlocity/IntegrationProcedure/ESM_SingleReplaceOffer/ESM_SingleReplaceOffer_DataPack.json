@@ -1,0 +1,31 @@
+{
+    "%vlocity_namespace%__CustomJavaScript__c": "ESM_SingleReplaceOffer_SampleInput.json",
+    "%vlocity_namespace%__DisableMetadataCache__c": false,
+    "%vlocity_namespace%__ElementTypeToHTMLTemplateList__c": "{\"ElementTypeToHTMLTemplateList\":[]}",
+    "%vlocity_namespace%__Element__c": [
+        "ESM_SingleReplaceOffer_Element_ExecuteReplaceOffers.json",
+        "ESM_SingleReplaceOffer_Element_GetReplacedLineItemIds.json",
+        "ESM_SingleReplaceOffer_Element_ApplyConfigurations.json",
+        "ESM_SingleReplaceOffer_Element_AssignMembers.json",
+        "ESM_SingleReplaceOffer_Element_UpdateCartProductRelationshipForReplacedOffer.json",
+        "ESM_SingleReplaceOffer_Element_DisconnectCartProductRelationshipForSourceOffer.json",
+        "ESM_SingleReplaceOffer_Element_GetReplaceItemsForValidate.json",
+        "ESM_SingleReplaceOffer_Element_getAssetRefIdforQli.json",
+        "ESM_SingleReplaceOffer_Element_ValidateLineItems.json",
+        "ESM_SingleReplaceOffer_Element_ResponseAction1.json"
+    ],
+    "%vlocity_namespace%__IsLwcEnabled__c": false,
+    "%vlocity_namespace%__IsProcedure__c": true,
+    "%vlocity_namespace%__IsReusable__c": false,
+    "%vlocity_namespace%__IsTest__c": false,
+    "%vlocity_namespace%__Language__c": "Procedure",
+    "%vlocity_namespace%__OmniProcessType__c": "Integration Procedure",
+    "%vlocity_namespace%__ProcedureKey__c": "ESM_SingleReplaceOffer",
+    "%vlocity_namespace%__PropertySet__c": "ESM_SingleReplaceOffer_PropertySet.json",
+    "%vlocity_namespace%__SubType__c": "SingleReplaceOffer",
+    "%vlocity_namespace%__Type__c": "ESM",
+    "Name": "ESM_SingleReplaceOffer",
+    "VlocityDataPackType": "SObject",
+    "VlocityRecordSObjectType": "%vlocity_namespace%__OmniScript__c",
+    "VlocityRecordSourceKey": "%vlocity_namespace%__OmniScript__c/ESM/SingleReplaceOffer/Procedure"
+}
