@@ -57,8 +57,14 @@ if git rev-parse --is-inside-work-tree >/dev/null 2>&1 && [ -n "$TARGET_BRANCH" 
   fi
 fi
 
+# NB: DELETED_FILES can list thousands of paths (e.g. a folder restructure),
+# which overflows Linux's per-env-var limit (MAX_ARG_STRLEN, 128KB) and fails
+# with "Argument list too long". Stage it in a temp file and let python read it.
+DELETED_LIST_FILE="$(mktemp)"
+printf '%s' "$DELETED_FILES" > "$DELETED_LIST_FILE"
+
 set +e
-SCAN_DELETED_FILES="$DELETED_FILES" \
+SCAN_DELETED_FILES_FILE="$DELETED_LIST_FILE" \
 SCAN_DESTRUCTIVE_FILE="$DESTRUCTIVE_CHANGES_FILE" \
 SCAN_REPORT_FILE="$REPORT_FILE" \
 python3 - <<'PY'
@@ -70,11 +76,11 @@ from pathlib import Path
 destructive_xml = Path(os.environ["SCAN_DESTRUCTIVE_FILE"])
 report_path     = Path(os.environ["SCAN_REPORT_FILE"])
 
-deleted_files = {
-    line.strip()
-    for line in (os.environ.get("SCAN_DELETED_FILES") or "").splitlines()
-    if line.strip()
-}
+deleted_files = set()
+_deleted_list_file = os.environ.get("SCAN_DELETED_FILES_FILE")
+if _deleted_list_file and os.path.exists(_deleted_list_file):
+    with open(_deleted_list_file, encoding="utf-8") as _fh:
+        deleted_files = {line.strip() for line in _fh if line.strip()}
 
 ns = {"md": "http://soap.sforce.com/2006/04/metadata"}
 
@@ -257,6 +263,7 @@ sys.exit(1)
 PY
 EXIT_CODE=$?
 set -e
+rm -f "$DELETED_LIST_FILE"
 
 # Mirror the Markdown report into the run's step summary so it surfaces on the
 # Actions UI even before the executive-summary step runs.
