@@ -167,6 +167,58 @@ SKIP_EXT = {
     ".class", ".ico", ".woff", ".woff2", ".ttf", ".eot", ".mp3", ".mp4",
 }
 
+# Apex source files. For these, a reference only blocks a Salesforce deletion
+# when it is a COMPILE-TIME (static) reference — e.g. List<Obj>, new Obj(),
+# inline [SELECT ... FROM Obj], or a typed Obj.Field. Names that appear only
+# inside string literals (dynamic SOQL / getGlobalDescribe / SObject.put/get)
+# or inside comments are resolved at runtime and do NOT prevent deletion, so we
+# must not block on them. We strip strings + comments before matching, but still
+# report the ORIGINAL line for context.
+APEX_EXT = {".cls", ".trigger"}
+
+def strip_apex(lines):
+    """Blank out single-quoted string literals and //, /* */ comments so that
+    only real Apex code tokens remain for matching. Returns a list parallel to
+    `lines` (same length); original lines are kept separately for the report."""
+    out = []
+    in_block = False  # inside an unterminated /* ... */
+    for line in lines:
+        res = []
+        i, n = 0, len(line)
+        in_str = False
+        while i < n:
+            c = line[i]
+            if in_block:
+                end = line.find("*/", i)
+                if end == -1:
+                    i = n
+                else:
+                    i = end + 2
+                    in_block = False
+                continue
+            if in_str:
+                if c == "\\":
+                    i += 2
+                    continue
+                if c == "'":
+                    in_str = False
+                i += 1
+                continue
+            if c == "'":                                   # start string literal
+                in_str = True
+                i += 1
+                continue
+            if c == "/" and i + 1 < n and line[i + 1] == "/":   # line comment
+                break
+            if c == "/" and i + 1 < n and line[i + 1] == "*":   # block comment
+                in_block = True
+                i += 2
+                continue
+            res.append(c)
+            i += 1
+        out.append("".join(res))
+    return out
+
 force_app = Path("force-app")
 errors = OrderedDict()  # member_key -> {file_path: [(lineno, content), …]}
 
@@ -194,11 +246,19 @@ for path in force_app.rglob("*"):
     except Exception:
         continue
 
+    # For Apex, match against a stripped copy (strings/comments removed) so only
+    # compile-time references count; everything else matches the raw line.
+    if path.suffix.lower() in APEX_EXT:
+        match_lines = strip_apex(lines)
+    else:
+        match_lines = lines
+
     # For each line, check all patterns. A line counts at most once per member.
-    for i, line in enumerate(lines, 1):
+    # We match on `scanline` (possibly stripped) but report the ORIGINAL line.
+    for i, (line, scanline) in enumerate(zip(lines, match_lines), 1):
         for mt, m, pats in member_patterns:
             for p in pats:
-                if p.search(line):
+                if p.search(scanline):
                     key = f"{mt}: {m}" if mt else m
                     errors.setdefault(key, OrderedDict()).setdefault(rel, []).append(
                         (i, line.rstrip())
