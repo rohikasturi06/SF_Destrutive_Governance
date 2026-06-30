@@ -1,0 +1,16 @@
+{
+    "additionalData": {
+        "cartId": "0Q0Hs0000029njbKAA",
+        "cartType": "Quote",
+        "movedLineItems": [
+            {
+                "%vlocity_namespace%__QuoteLineItemId__c": "0QLHs000005oWsoOAE",
+                "%vlocity_namespace%__RelatedQuoteLineItemId__c": "0QLHs000005oWsJOAU",
+                "Id": "a3cHs0000050ILdIAM"
+            }
+        ]
+    },
+    "itemsToProcessSubsetList": [
+        "0QLHs000005oWsJOAU"
+    ]
+}

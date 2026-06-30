@@ -1,0 +1,10 @@
+{
+    "AccountId": "0011Q00002bvJggQAE",
+    "assetIds": "02i1Q000008AC0gQAG,02i1Q000008AC0nQAG",
+    "assetRefIdsList": "803d4be1-a4ba-637a-e17a-283f084d97f8,0e2e7492-03d7-f219-4043-67b8002b48f4",
+    "cartType": "Order",
+    "isBulk": "oneTime",
+    "orderName": "TestOrder",
+    "priceList": "a3w1Q000001HbDQQA0",
+    "startDate": "2024-03-22"
+}

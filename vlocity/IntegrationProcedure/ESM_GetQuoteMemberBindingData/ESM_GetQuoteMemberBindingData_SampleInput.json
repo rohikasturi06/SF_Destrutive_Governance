@@ -1,0 +1,13 @@
+{
+    "conditions": [
+        {
+            "fieldName": "ProductCode",
+            "value": "VPL_OFFERING_5GB_500_MINUTES_500_TEXTS_30_DAYS"
+        },
+        {
+            "fieldName": "ProductCode",
+            "value": "VEPC_OFFERING_BUSINESS_INTERNET_ENHANCED"
+        }
+    ],
+    "decisionTableId": "0lDHp000000wruvMAA"
+}

@@ -1,0 +1,18 @@
+{
+    "appliedAdjustments": [
+        {
+            "adjustmentCode": "",
+            "adjustmentMethod": "Absolute",
+            "adjustmentValue": -7,
+            "detailType": "ADJUSTMENT",
+            "field": "%vlocity_namespace%__OneTimeCharge__c",
+            "pricingVariableCode": "OT_STD_PRC"
+        }
+    ],
+    "cartId": "0Q08Z000002HO9ySAG",
+    "lineItems": [
+        "0QL8Z000005NfphWAC",
+        "0QL8Z000005NfrgWAC",
+        "0QL8Z000005NfrrWAC"
+    ]
+}
