@@ -369,8 +369,11 @@ build_vlocity_delta_project() {
       echo "autoUpdateSettings: true"
       echo "defaultMaxParallel: 10"
       echo "maxDepth: -1"
-      echo "activate: true"
-      echo "compileLwc: true"
+      # activate/compileLwc disabled by default: the activation + LWC-compile
+      # REST endpoints belong to the Vlocity managed package and 404 ("Could not
+      # find a match for URL") on namespace-less OmniStudio Standard orgs.
+      echo "activate: false"
+      echo "compileLwc: false"
       echo "ignoreAllErrors: false"
       echo "verbose: true"
       echo "simpleLogging: true"
