@@ -48,7 +48,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '20'
 
       - name: Optimize Salesforce CLI Performance
         uses: actions/cache@v4
@@ -95,11 +95,34 @@ jobs:
         if: env.HAS_ORG_AUTH == 'true'
         run: |
           echo "🔐 Authenticating to QA Salesforce Org..."
-          # Fail fast if the auth URL itself is rejected by the CLI.
-          if ! sf org login sfdx-url --sfdx-url-file <(echo "${{ secrets.QA_SF_AUTH_URL }}") --alias qa --set-default 2>/tmp/sf-login.err; then
-            echo "❌ sf org login failed — QA_SF_AUTH_URL is invalid, expired, or malformed."
-            echo "   Regenerate it with: sf org display --target-org <qa-org> --verbose --json | jq -r '.result.sfdxAuthUrl'"
-            sed 's/^/   /' /tmp/sf-login.err 2>/dev/null || true
+          # Write the secret to a temp file with printf (no trailing newline,
+          # no quoting changes) instead of <(echo ...), which can mangle the URL.
+          AUTH_FILE="$(mktemp)"
+          printf '%s' "${{ secrets.QA_SF_AUTH_URL }}" > "$AUTH_FILE"
+
+          # Validate the shape WITHOUT printing the secret. A valid SFDX auth URL
+          # always starts with 'force://'. The most common CI mistakes are storing
+          # 'null', an access token, or a value wrapped in quotes/whitespace.
+          if ! grep -q '^force://' "$AUTH_FILE"; then
+            echo "❌ QA_SF_AUTH_URL is not a valid SFDX auth URL (must start with 'force://')."
+            echo "   Likely the secret holds 'null', an access token, or has surrounding quotes/whitespace."
+            echo "   Regenerate it with: sf org auth show-sfdx-auth-url --target-org <qa-org>  (NOTE: 'sf org display' now REDACTS sfdxAuthUrl)"
+            rm -f "$AUTH_FILE"
+            exit 1
+          fi
+
+          # Capture the CLI's REAL error. `sf` prints its error JSON to stdout, so
+          # the previous '2>/tmp/sf-login.err' only kept the Node warning and hid
+          # the actual reason. --json + combined capture surfaces it safely.
+          set +e
+          LOGIN_OUT="$(sf org login sfdx-url --sfdx-url-file "$AUTH_FILE" --alias qa --set-default --json 2>&1)"
+          LOGIN_RC=$?
+          set -e
+          rm -f "$AUTH_FILE"
+          if [ "$LOGIN_RC" -ne 0 ]; then
+            echo "❌ sf org login failed (exit ${LOGIN_RC}). Reason reported by Salesforce CLI:"
+            echo "$LOGIN_OUT" | jq -r '.message // .name // empty' 2>/dev/null | sed 's/^/   /' || true
+            echo "   Regenerate it with: sf org auth show-sfdx-auth-url --target-org <qa-org>  (NOTE: 'sf org display' now REDACTS sfdxAuthUrl)"
             exit 1
           fi
 
