@@ -48,3 +48,4 @@
     "VlocityRecordSObjectType": "%vlocity_namespace%__Element__c",
     "VlocityRecordSourceKey": "%vlocity_namespace%__Element__c/%vlocity_namespace%__OmniScript__c/ESM/BulkDeleteOrderMembers/Procedure/ResponseAction1"
 }
+

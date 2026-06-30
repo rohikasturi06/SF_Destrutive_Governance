@@ -30,19 +30,35 @@ if [ -z "${SF_AUTH_URL:-}" ]; then
   exit 1
 fi
 
-# Write authentication URL to temporary file for security
+# Write authentication URL to temporary file for security.
+# Use printf (not echo) so we don't append a trailing newline or alter quoting.
 echo "🔒 Preparing secure authentication file..."
-AUTH_FILE="/tmp/authFile.txt"
-echo "$SF_AUTH_URL" > "$AUTH_FILE"
+AUTH_FILE="$(mktemp)"
+printf '%s' "$SF_AUTH_URL" > "$AUTH_FILE"
 
 ALIAS="${ORG_NAME:-sandbox}"
 
-# Authenticate using SFDX URL and configure as default org
+# Validate the shape WITHOUT printing the secret. A valid SFDX auth URL always
+# starts with 'force://'. NOTE: recent Salesforce CLI security changes REDACT
+# sfdxAuthUrl from `sf org display --json`; regenerate the secret with
+# `sf org auth show-sfdx-auth-url --target-org <org>` instead.
+if ! grep -q '^force://' "$AUTH_FILE"; then
+  echo "❌ SF_AUTH_URL is not a valid SFDX auth URL (must start with 'force://')."
+  echo "💡 The secret likely holds 'null', an access token, or quotes/whitespace."
+  echo "   Regenerate it with: sf org auth show-sfdx-auth-url --target-org <org>"
+  rm -f "$AUTH_FILE"
+  exit 1
+fi
+
+# Authenticate using SFDX URL and configure as default org. Capture the CLI's
+# real error (printed to stdout as JSON) instead of discarding it with
+# '>/dev/null 2>&1', which previously hid the actual reason for failures.
 echo "🔗 Connecting to Salesforce sandbox environment (alias: $ALIAS)..."
-if sf org login sfdx-url \
-  --sfdx-url-file "$AUTH_FILE" \
-  --alias "$ALIAS" \
-  --set-default >/dev/null 2>&1; then
+set +e
+LOGIN_OUT="$(sf org login sfdx-url --sfdx-url-file "$AUTH_FILE" --alias "$ALIAS" --set-default --json 2>&1)"
+LOGIN_RC=$?
+set -e
+if [ "$LOGIN_RC" -eq 0 ]; then
 
   echo "✅ Authentication successful - sandbox environment ready"
   # Secure cleanup of temporary authentication file
@@ -58,7 +74,10 @@ if sf org login sfdx-url \
     "  • Org Id: " + ( .result.id // "n/a" )
   ' || true
 else
-  echo "❌ Authentication failed - check credentials and network connectivity"
+  echo "❌ Authentication failed (exit ${LOGIN_RC}). Reason reported by Salesforce CLI:"
+  echo "$LOGIN_OUT" | jq -r '.message // .name // empty' 2>/dev/null | sed 's/^/   /' || true
+  echo "💡 If sfdxAuthUrl came back redacted/null, regenerate with:"
+  echo "   sf org auth show-sfdx-auth-url --target-org <org>"
   rm -f "$AUTH_FILE"
   exit 1
 fi

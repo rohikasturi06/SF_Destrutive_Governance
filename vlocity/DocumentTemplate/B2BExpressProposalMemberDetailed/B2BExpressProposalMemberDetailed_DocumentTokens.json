@@ -3,7 +3,7 @@
         "%vlocity_namespace%__Description__c": "",
         "%vlocity_namespace%__DocumentTemplateId__c": {
             "%vlocity_namespace%__ExternalID__c": "B2BExpressProposalMemberDetailed/3/Vlocity Express/1615821978137",
-            "VlocityDataPackType": "VlocityMatchingKeyObject",
+            "VlocityDataPackType": "VlocityMatchingKeyObject", 
             "VlocityMatchingRecordSourceKey": "%vlocity_namespace%__DocumentTemplate__c/B2BExpressProposalMemberDetailed",
             "VlocityRecordSObjectType": "%vlocity_namespace%__DocumentTemplate__c"
         },

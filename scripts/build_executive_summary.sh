@@ -49,6 +49,16 @@ COVERAGE_THRESHOLD="${COVERAGE_THRESHOLD:-75}"
 
 TARGET_ENV_UPPER=$(echo "$TARGET_ENV" | tr '[:lower:]' '[:upper:]')
 
+# Detect Vlocity file changes for header context.
+VLOCITY_CHANGED_LIST=""
+VLOCITY_CHANGED_COUNT=0
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  VLOCITY_CHANGED_LIST=$(git diff --name-only "origin/${TARGET_BRANCH}" HEAD 2>/dev/null | grep -E '^vlocity/' || true)
+  if [ -n "$VLOCITY_CHANGED_LIST" ]; then
+    VLOCITY_CHANGED_COUNT=$(printf '%s\n' "$VLOCITY_CHANGED_LIST" | grep -c . || true)
+  fi
+fi
+
 # ------------------------------------------------------------------------------
 # Extract Jira/ticket id from PR title (e.g. "[PROJ-123] Clean up...").
 # ------------------------------------------------------------------------------
@@ -182,7 +192,11 @@ fi
 # Header
 # ------------------------------------------------------------------------------
 {
-  echo "# 🎯 Executive Deployment Summary"
+  if [ "${VLOCITY_CHANGED_COUNT}" -gt 0 ]; then
+    echo "# 🎯 Executive Deployment Summary — Vlocity Changes"
+  else
+    echo "# 🎯 Executive Deployment Summary"
+  fi
   echo ""
   if [ -n "$TICKET_ID" ]; then
     echo "**User Story:** \`${TICKET_ID}\` ${TICKET_TITLE}"
@@ -194,6 +208,10 @@ fi
     printf ' &nbsp;&nbsp;|&nbsp;&nbsp; **PR:** #%s' "$PR_NUMBER"
   fi
   echo ""
+  if [ "${VLOCITY_CHANGED_COUNT}" -gt 0 ]; then
+    printf '**Vlocity Scope:** `%s file(s)` changed under `vlocity/`' "$VLOCITY_CHANGED_COUNT"
+    echo ""
+  fi
   echo ""
   echo "### 🚦 Health & Safety Check"
   echo ""
@@ -421,6 +439,10 @@ elif [ "${HAS_DESTRUCTIVE_CHANGES:-false}" != "true" ]; then
     echo "### 📝 No Salesforce Components Modified"
     echo ""
     echo "_Only pipeline / configuration files changed in this PR. No Salesforce metadata was added, modified, or deleted._"
+    if [ "${VLOCITY_CHANGED_COUNT}" -gt 0 ]; then
+      echo ""
+      echo "_Vlocity files were detected in this PR and are deployed post-merge via the Vlocity deployment stage._"
+    fi
     echo ""
   } >> "$OUTPUT_FILE"
 fi
@@ -431,8 +453,18 @@ fi
 if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   CHANGED_PIPELINE=$(git diff --name-only "origin/${TARGET_BRANCH}" HEAD 2>/dev/null \
                        | grep -E '\.(sh|yml|yaml)$|^\.github/' || true)
+  PIPELINE_COUNT=$(printf '%s\n' "$CHANGED_PIPELINE" | grep -c . || true)
+
+  # Keep this section explicitly visible for Vlocity-only PRs, since reviewers
+  # rely on it as confirmation that the change set is pipeline/config oriented.
+  if [ "${VLOCITY_CHANGED_COUNT}" -gt 0 ]; then
+    {
+      echo "### 🔧 Scripts & Pipeline Configurations (Developer Only) — ${PIPELINE_COUNT} file(s)"
+      echo ""
+    } >> "$OUTPUT_FILE"
+  fi
+
   if [ -n "$CHANGED_PIPELINE" ]; then
-    PIPELINE_COUNT=$(printf '%s\n' "$CHANGED_PIPELINE" | grep -c . || true)
     {
       echo "<details>"
       echo "<summary><strong>🔧 Scripts &amp; Pipeline Configurations (Developer Only)</strong> — ${PIPELINE_COUNT} file(s)</summary>"

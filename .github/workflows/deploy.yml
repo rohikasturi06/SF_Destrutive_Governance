@@ -593,8 +593,10 @@ jobs:
           echo "$EMAIL_CONTENT" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
-      - name: Send Deployment Summary Email
-        if: always()
+      # Temporarily disabled: mail action errors when recipient fields are empty
+      # ("At least one of 'to', 'cc' or 'bcc' must be specified").
+      - name: Send Deployment Summary Email (disabled)
+        if: false
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: smtp.gmail.com
