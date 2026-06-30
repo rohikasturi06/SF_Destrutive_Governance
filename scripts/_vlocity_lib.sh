@@ -23,7 +23,7 @@ __VLOCITY_LIB_LOADED=1
 
 # Defaults (callers may override via env)
 : "${VLOCITY_ROOT:=vlocity}"
-: "${VLOCITY_JOB_FILE:=vlocity/deploy.yaml}"
+: "${VLOCITY_JOB_FILE:=scripts/vlocity_deploy.yaml}"
 : "${VLOCITY_PROJECT_PATH:=vlocity/datapacks}"
 : "${VLOCITY_REPORTS_DIR:=reports/vlocity}"
 : "${VLOCITY_RETRY_LIMIT:=1}"
