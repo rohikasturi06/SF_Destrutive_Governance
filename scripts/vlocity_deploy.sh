@@ -53,6 +53,22 @@ VLOCITY_ENV_NAME="${ORG_ALIAS}_Vlocity"
 
 mkdir -p "$VLOCITY_REPORTS_DIR"
 
+# ------------------------------------------------------------------------------
+# emit_vlocity_deployed <true|false>
+# Publishes a `vlocity-deployed` step output so deploy.yml knows whether this
+# run actually pushed datapacks. The post-merge workflow uses it to decide when
+# to advance the deploy baseline tag: the tag must only move forward once
+# everything that needed deploying (SF core AND Vlocity) has succeeded, so that
+# a Vlocity failure leaves the baseline untouched and the failed datapacks are
+# re-attempted on the next push. No-op outside GitHub Actions.
+# ------------------------------------------------------------------------------
+emit_vlocity_deployed() {
+  local deployed="${1:-false}"
+  if [ -n "${GITHUB_OUTPUT:-}" ] && [ -w "${GITHUB_OUTPUT}" ]; then
+    echo "vlocity-deployed=${deployed}" >> "$GITHUB_OUTPUT"
+  fi
+}
+
 echo ""
 echo "🚀 STAGE: VLOCITY DEPLOY"
 echo "=================================="
@@ -73,6 +89,7 @@ if [ "${HAS_VLOCITY_CHANGES:-false}" != "true" ]; then
     --arg reason "No Vlocity/OmniStudio components changed in this delta" \
     '{result:{status:$status, message:$reason}}' \
     > "${VLOCITY_REPORTS_DIR}/summary.json"
+  emit_vlocity_deployed false
   echo "✅ STAGE COMPLETED: Vlocity deploy skipped (no changes)"
   exit 0
 fi
@@ -91,6 +108,7 @@ if [ "${VLOCITY_DELTA_PACK_COUNT:-0}" -eq 0 ]; then
     --arg reason "Vlocity files changed but no datapack folders (vlocity/<Type>/<Name>/) were affected" \
     '{result:{status:$status, message:$reason}}' \
     > "${VLOCITY_REPORTS_DIR}/summary.json"
+  emit_vlocity_deployed false
   echo "✅ STAGE COMPLETED: Vlocity deploy skipped (no datapacks in delta)"
   exit 0
 fi
@@ -204,10 +222,16 @@ if [ -n "$DEPLOYMENT_ID" ]; then
 fi
 
 if [ "$DEPLOY_RC" -eq 0 ]; then
+  # Datapacks were actually deployed (VLOCITY_DELTA_PACK_COUNT > 0 was already
+  # asserted above) — signal success so the workflow advances the baseline tag.
+  emit_vlocity_deployed true
   echo ""
   echo "✅ STAGE COMPLETED: Vlocity deploy to ${VLOCITY_ENV_NAME} succeeded"
   exit 0
 else
+  # Leave vlocity-deployed unset/false; the job fails and the baseline tag is
+  # NOT advanced, so these datapacks are retried on the next push.
+  emit_vlocity_deployed false
   echo ""
   echo "❌ STAGE FAILED: Deploy to ${VLOCITY_ENV_NAME} failed even after packRetry"
   exit "$DEPLOY_RC"
