@@ -3,19 +3,4 @@
     <description>Grants external access to the Dependency Test object.</description>
     <hasActivationRequired>false</hasActivationRequired>
     <label>Dependency Perm Set</label>
-    <fieldPermissions>
-        <editable>true</editable>
-        <field>Dependency_Test__c.Test_Text__c</field>
-        <readable>true</readable>
-    </fieldPermissions>
-    <objectPermissions>
-        <allowCreate>true</allowCreate>
-        <allowDelete>true</allowDelete>
-        <allowEdit>true</allowEdit>
-        <allowRead>true</allowRead>
-        <modifyAllRecords>false</modifyAllRecords>
-        <object>Dependency_Test__c</object>
-        <viewAllFields>false</viewAllFields>
-        <viewAllRecords>false</viewAllRecords>
-    </objectPermissions>
 </PermissionSet>
