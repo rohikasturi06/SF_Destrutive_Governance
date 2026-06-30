@@ -48,7 +48,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
 
       - name: Optimize Salesforce CLI Performance
         uses: actions/cache@v4
@@ -631,8 +631,10 @@ jobs:
           header: deployment-summary-${{ env.TARGET_ENV }}-${{ github.run_id }}
           path: reports/executive-summary.md
 
-      - name: Send PR Validation Summary Email
-        if: always() && env.HAS_EMAIL_CONFIG == 'true'
+      # Temporarily disabled: mail action errors when recipient fields are empty
+      # ("At least one of 'to', 'cc' or 'bcc' must be specified").
+      - name: Send PR Validation Summary Email (disabled)
+        if: false
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: smtp.gmail.com

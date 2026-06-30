@@ -49,6 +49,16 @@ COVERAGE_THRESHOLD="${COVERAGE_THRESHOLD:-75}"
 
 TARGET_ENV_UPPER=$(echo "$TARGET_ENV" | tr '[:lower:]' '[:upper:]')
 
+# Detect Vlocity file changes for header context.
+VLOCITY_CHANGED_LIST=""
+VLOCITY_CHANGED_COUNT=0
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  VLOCITY_CHANGED_LIST=$(git diff --name-only "origin/${TARGET_BRANCH}" HEAD 2>/dev/null | grep -E '^vlocity/' || true)
+  if [ -n "$VLOCITY_CHANGED_LIST" ]; then
+    VLOCITY_CHANGED_COUNT=$(printf '%s\n' "$VLOCITY_CHANGED_LIST" | grep -c . || true)
+  fi
+fi
+
 # ------------------------------------------------------------------------------
 # Extract Jira/ticket id from PR title (e.g. "[PROJ-123] Clean up...").
 # ------------------------------------------------------------------------------
@@ -182,7 +192,11 @@ fi
 # Header
 # ------------------------------------------------------------------------------
 {
-  echo "# 🎯 Executive Deployment Summary"
+  if [ "${VLOCITY_CHANGED_COUNT}" -gt 0 ]; then
+    echo "# 🎯 Executive Deployment Summary — Vlocity Changes"
+  else
+    echo "# 🎯 Executive Deployment Summary"
+  fi
   echo ""
   if [ -n "$TICKET_ID" ]; then
     echo "**User Story:** \`${TICKET_ID}\` ${TICKET_TITLE}"
@@ -194,6 +208,10 @@ fi
     printf ' &nbsp;&nbsp;|&nbsp;&nbsp; **PR:** #%s' "$PR_NUMBER"
   fi
   echo ""
+  if [ "${VLOCITY_CHANGED_COUNT}" -gt 0 ]; then
+    printf '**Vlocity Scope:** `%s file(s)` changed under `vlocity/`' "$VLOCITY_CHANGED_COUNT"
+    echo ""
+  fi
   echo ""
   echo "### 🚦 Health & Safety Check"
   echo ""
