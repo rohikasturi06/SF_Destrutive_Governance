@@ -153,10 +153,58 @@ print_vlocity_preview() {
 install_vlocity_cli() {
   if command -v vlocity >/dev/null 2>&1; then
     vlocity_log "vlocity CLI already installed: $(vlocity --version 2>/dev/null || echo unknown)"
+    patch_vlocity_omnistudio_nullguard
     return 0
   fi
   vlocity_log "Installing vlocity build tool (npm i -g vlocity@${VLOCITY_BUILD_VERSION:-latest})"
   npm install -g "vlocity@${VLOCITY_BUILD_VERSION:-latest}" --silent
+  patch_vlocity_omnistudio_nullguard
+}
+
+# ------------------------------------------------------------------------------
+# patch_vlocity_omnistudio_nullguard
+# Works around an upstream Vlocity Build Tool bug (present through v1.17.24 and
+# current master) that crashes when deploying to a *namespace-less* OmniStudio
+# Standard org:
+#
+#   DataPacksUtils.getExpandedDefinition():
+#     if (this.vlocity.isOmniStudioInstalled && !this.vlocity.namespace) {
+#         SObjectType = SObjectType.replace('%vlocity_namespace%__', '');
+#     }
+#
+# Callers like isDeployLast()/isSoloExport()/isForceQueueable() pass
+# SObjectType = null, so on an OmniStudio org without a namespace this throws:
+#   TypeError: Cannot read properties of null (reading 'replace')
+# before any datapack is deployed.
+#
+# We inject the missing null-guard (`&& SObjectType`) into the condition. The
+# edit is idempotent and a no-op if the file/line can't be found, so it never
+# breaks the deploy on a fixed build tool version.
+# ------------------------------------------------------------------------------
+patch_vlocity_omnistudio_nullguard() {
+  local global_root vfile
+  global_root="$(npm root -g 2>/dev/null || true)"
+  vfile="${global_root}/vlocity/lib/datapacksutils.js"
+
+  if [ -z "$global_root" ] || [ ! -f "$vfile" ]; then
+    vlocity_log "WARN: could not locate vlocity datapacksutils.js to patch (skipping null-guard)"
+    return 0
+  fi
+
+  if grep -q 'this.vlocity.namespace && SObjectType)' "$vfile"; then
+    vlocity_log "vlocity null-guard already applied"
+    return 0
+  fi
+
+  if sed -i.bak \
+      's/this\.vlocity\.isOmniStudioInstalled && !this\.vlocity\.namespace)/this.vlocity.isOmniStudioInstalled \&\& !this.vlocity.namespace \&\& SObjectType)/g' \
+      "$vfile" 2>/dev/null && grep -q 'this.vlocity.namespace && SObjectType)' "$vfile"; then
+    rm -f "${vfile}.bak"
+    vlocity_log "Patched vlocity datapacksutils.js null-guard for namespace-less OmniStudio orgs"
+  else
+    [ -f "${vfile}.bak" ] && mv -f "${vfile}.bak" "$vfile"
+    vlocity_log "WARN: vlocity null-guard patch did not apply (build-tool layout may have changed)"
+  fi
 }
 
 # ------------------------------------------------------------------------------

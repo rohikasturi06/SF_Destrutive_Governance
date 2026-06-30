@@ -437,27 +437,16 @@ jobs:
                   fi
                   
                   echo "═══════════════════════════════════════════════════════"
-                  
-                # Advance environment deployment tag only if a real deployment package existed
-                if [ "${HAS_DEPLOYMENT_PACKAGE:-false}" = "true" ]; then
-                  echo "🏷️  Advancing tag ${DEPLOY_TAG} -> ${GITHUB_SHA}"
-                  # Configure git user for tag operations
-                  git config user.email "github-actions[bot]@users.noreply.github.com" || true
-                  git config user.name "github-actions[bot]" || true
-                  
-                  # Force fetch to resolve any tag conflicts
-                  git fetch --tags --force --quiet || true
-                  
-                  # Create/update the tag locally
-                  git tag -f "${DEPLOY_TAG}" "${GITHUB_SHA}" || true
-                  
-                  # Push the tag with force to resolve remote conflicts
-                  git push origin -f "${DEPLOY_TAG}" || true
-                  
-                  echo "✅ Tag ${DEPLOY_TAG} advanced to ${GITHUB_SHA}"
-                else
-                  echo "ℹ️  Skipping tag advance (no deployment package)."
-                fi
+
+                  # NB: the deploy baseline tag (deploy-<env>) is intentionally
+                  # NOT advanced here. The core deploy succeeding is only half
+                  # the story — the Vlocity pack deploy runs in a later step. If
+                  # we advanced the tag now and Vlocity then failed, the next
+                  # push's delta baseline would skip past the failed datapacks
+                  # and silently drop them. The tag is advanced in the dedicated
+                  # "Advance deploy baseline tag" step, which runs only after the
+                  # Vlocity step and only when the whole job succeeded.
+                  echo "ℹ️  Core deploy succeeded — baseline tag will advance after Vlocity completes."
                   break
                   ;;
                 Failed|Canceled|Aborted|Rejected)
@@ -497,6 +486,29 @@ jobs:
                                 || env.ORG_NAME == 'intuat' && secrets.INTUAT_VLOCITY_SF_AUTH_URL
                                 || '' }}
         run: ./scripts/vlocity_deploy.sh
+
+      # Advance the deploy baseline tag (deploy-<env>) to this commit ONLY when
+      # the entire job — core SF deploy AND Vlocity pack deploy — succeeded.
+      # `if: success()` is the key guard: if the Vlocity step above failed, the
+      # job is already in a failure state, this step is skipped, the tag stays
+      # put, and the next push re-derives its delta from the last fully
+      # successful commit — so failed Vlocity datapacks are re-deployed instead
+      # of being silently dropped. We advance when core deployed a package OR
+      # Vlocity actually deployed datapacks, so Vlocity-only changes also move
+      # the baseline forward (no redundant re-deploys on later unrelated pushes).
+      - name: Advance deploy baseline tag
+        if: success() && (env.HAS_DEPLOYMENT_PACKAGE == 'true' || steps.vlocity-deploy.outputs.vlocity-deployed == 'true')
+        run: |
+          set -euo pipefail
+          echo "🏷️  Advancing tag ${DEPLOY_TAG} -> ${GITHUB_SHA}"
+          # Configure git user for tag operations
+          git config user.email "github-actions[bot]@users.noreply.github.com" || true
+          git config user.name "github-actions[bot]" || true
+          # Force fetch to resolve any tag conflicts, then move the tag.
+          git fetch --tags --force --quiet || true
+          git tag -f "${DEPLOY_TAG}" "${GITHUB_SHA}" || true
+          git push origin -f "${DEPLOY_TAG}" || true
+          echo "✅ Tag ${DEPLOY_TAG} advanced to ${GITHUB_SHA} (core + Vlocity both succeeded)"
 
       - name: Clean up failed delta artifacts after successful deployment
         if: success() && env.HAS_DEPLOYMENT_PACKAGE == 'true'
