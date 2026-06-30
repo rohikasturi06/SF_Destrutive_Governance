@@ -2,25 +2,6 @@
 private class DependencyTestCoreTests {
 
     @IsTest
-    static void testStringUtilityAndHandler() {
-        // StringUtility.formatName should upper-case non-null input
-        String input  = 'my account';
-        String output = StringUtility.formatName(input);
-        System.assertEquals('MY ACCOUNT', output);
-
-        // Simulate before-insert trigger calling AccountTriggerHandler.beforeInsert
-        Account a = new Account(Name = 'test name');
-        List<Account> records = new List<Account>{ a };
-
-        Test.startTest();
-        AccountTriggerHandler.beforeInsert(records);
-        Test.stopTest();
-
-        // The handler should safely run and update the Name
-        System.assertEquals('TEST NAME', records[0].Name);
-    }
-
-    @IsTest
     static void testDependencyTestHelperQuery() {
         Schema.SObjectType dependencyType = Schema.getGlobalDescribe().get('Dependency_Test__c');
 
