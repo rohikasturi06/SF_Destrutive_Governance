@@ -1,0 +1,66 @@
+name: No-Op Parameter Probe
+
+# ==============================================================================
+# Phase 4.2 — No-Op workflow template.
+#
+# Pushed to the default branch so the workflow_dispatch parameter form (choices,
+# booleans, string fields) can be exercised and validated in the Actions tab
+# BEFORE wiring the parameters into the live Salesforce pipeline. It performs no
+# deployment and touches no org — it only echoes the typed inputs back, securely.
+# ==============================================================================
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_env:
+        description: 'Target Salesforce Environment'
+        required: true
+        type: choice
+        options:
+          - sandbox-dev
+          - sandbox-uat
+          - production
+        default: 'sandbox-dev'
+      test_level:
+        description: 'Salesforce Apex Test Level'
+        required: true
+        type: choice
+        options:
+          - NoTestRun
+          - RunSpecifiedTests
+          - RunLocalTests
+          - RunAllTestsInOrg
+        default: 'RunLocalTests'
+      specified_tests:
+        description: 'Target test classes (comma/space-separated)'
+        required: false
+        type: string
+        default: ''
+      bypass_code_scanners:
+        description: 'Bypass Static Code Quality Scanners?'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: Echo Inputs (no-op)
+    runs-on: ubuntu-latest
+    # Inputs are passed via env (never interpolated into the run line) so this
+    # template also models the injection-safe pattern used by the real pipeline.
+    env:
+      IN_ENV: ${{ github.event.inputs.target_env }}
+      IN_LEVEL: ${{ github.event.inputs.test_level }}
+      IN_TESTS: ${{ github.event.inputs.specified_tests }}
+      IN_BYPASS: ${{ github.event.inputs.bypass_code_scanners }}
+    steps:
+      - name: Show resolved dispatch inputs
+        run: |
+          echo "target_env           = ${IN_ENV}"
+          echo "test_level           = ${IN_LEVEL}"
+          echo "specified_tests      = ${IN_TESTS:-<none>}"
+          echo "bypass_code_scanners = ${IN_BYPASS}"
+          echo "✅ No-op probe complete — no org was contacted."
