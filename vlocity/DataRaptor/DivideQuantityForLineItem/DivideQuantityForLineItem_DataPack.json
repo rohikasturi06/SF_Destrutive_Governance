@@ -48,3 +48,4 @@
     "VlocityRecordSObjectType": "%vlocity_namespace%__DRBundle__c",
     "VlocityRecordSourceKey": "%vlocity_namespace%__DRBundle__c/DivideQuantityForLineItem"
 }
+
