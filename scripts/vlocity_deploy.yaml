@@ -52,13 +52,22 @@ autoUpdateSettings: true
 defaultMaxParallel: 10
 maxDepth: -1
 
-# Activate datapacks after deploy (matches `packDeploy` behavior in Jenkins).
-activate: true
+# Activate datapacks after deploy.
+#
+# DISABLED for namespace-less "OmniStudio Standard" orgs. The activation step
+# POSTs to the Vlocity managed-package Apex REST endpoints, which DO NOT EXIST on
+# an org without the vlocity_cmt/vlocity_ins namespace. That is what produced:
+#   "<Type>/<Name> - Could not find a match for URL"
+# for every datapack. With activate:false the datapacks deploy as records and
+# are then activated by the OmniStudio runtime / manually in-org.
+# Re-enable (activate: true) only when deploying to a managed-package Vlocity org.
+activate: false
 
-# Compile LWC OmniScripts during deploy. Puppeteer is required for the headless
-# compile step. The workflow installs/uninstalls puppeteer depending on the
-# target environment (see scripts/vlocity_deploy.sh).
-compileLwc: true
+# Compile LWC OmniScripts during deploy. Also DISABLED for the same reason — the
+# headless LWC compile calls an org-side compiler REST endpoint that the
+# namespace-less OmniStudio Standard org does not expose, contributing to the
+# "Could not find a match for URL" failures. Re-enable on a managed-package org.
+compileLwc: false
 
 # Skip Salesforce-side validation rules that frequently conflict with managed
 # Vlocity metadata; safer when promoting between sandboxes.

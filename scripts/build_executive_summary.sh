@@ -49,13 +49,30 @@ COVERAGE_THRESHOLD="${COVERAGE_THRESHOLD:-75}"
 
 TARGET_ENV_UPPER=$(echo "$TARGET_ENV" | tr '[:lower:]' '[:upper:]')
 
-# Detect Vlocity file changes for header context.
+# Detect Vlocity changes for header context.
+#
+# IMPORTANT baseline choice: use the merge-base (three-dot) diff
+# "origin/<base>...HEAD" so we report only the changes THIS PR introduced, not
+# every file that happens to differ between the branch tips. We also report the
+# count of changed *datapacks* (unique vlocity/<Type>/<Name> folders) — the same
+# unit the post-merge deploy uses ("N changed datapack(s)") — so the summary and
+# the deploy preview speak the same language instead of disagreeing (a raw file
+# count balloons to thousands whenever the whole folder is regenerated/moved).
 VLOCITY_CHANGED_LIST=""
+VLOCITY_CHANGED_FILE_COUNT=0
 VLOCITY_CHANGED_COUNT=0
 if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  VLOCITY_CHANGED_LIST=$(git diff --name-only "origin/${TARGET_BRANCH}" HEAD 2>/dev/null | grep -E '^vlocity/' || true)
+  # Prefer merge-base diff; fall back to tip diff if the merge base is unavailable.
+  VLOCITY_CHANGED_LIST=$(git diff --name-only "origin/${TARGET_BRANCH}...HEAD" 2>/dev/null | grep -E '^vlocity/' || true)
+  if [ -z "$VLOCITY_CHANGED_LIST" ]; then
+    VLOCITY_CHANGED_LIST=$(git diff --name-only "origin/${TARGET_BRANCH}" HEAD 2>/dev/null | grep -E '^vlocity/' || true)
+  fi
   if [ -n "$VLOCITY_CHANGED_LIST" ]; then
-    VLOCITY_CHANGED_COUNT=$(printf '%s\n' "$VLOCITY_CHANGED_LIST" | grep -c . || true)
+    VLOCITY_CHANGED_FILE_COUNT=$(printf '%s\n' "$VLOCITY_CHANGED_LIST" | grep -c . || true)
+    # Collapse to unique datapack folders: vlocity/<Type>/<Name>.
+    VLOCITY_CHANGED_COUNT=$(printf '%s\n' "$VLOCITY_CHANGED_LIST" \
+      | awk -F/ 'NF>=3 && $1=="vlocity" {print $1"/"$2"/"$3}' \
+      | sort -u | grep -c . || true)
   fi
 fi
 
@@ -209,7 +226,8 @@ fi
   fi
   echo ""
   if [ "${VLOCITY_CHANGED_COUNT}" -gt 0 ]; then
-    printf '**Vlocity Scope:** `%s file(s)` changed under `vlocity/`' "$VLOCITY_CHANGED_COUNT"
+    printf '**Vlocity Scope:** `%s datapack(s)` changed (`%s` file(s) under `vlocity/`, vs `%s`)' \
+      "$VLOCITY_CHANGED_COUNT" "$VLOCITY_CHANGED_FILE_COUNT" "$TARGET_BRANCH"
     echo ""
   fi
   echo ""
