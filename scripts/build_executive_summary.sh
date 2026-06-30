@@ -137,6 +137,17 @@ case "$DEPLOY_STATUS" in
     ;;
 esac
 
+# A PR that touches only pipeline/config/Vlocity files produces no Salesforce
+# deploy report, so DEPLOY_STATUS stays "Unknown". That is NOT a failure — there
+# was simply no SF metadata to dry-run. Report it green so the gate verdict
+# (which already passes) and this summary agree.
+if [ "$DEPLOY_STATUS" = "Unknown" ] && ! has_source_metadata && [ "${HAS_DESTRUCTIVE_CHANGES:-false}" != "true" ]; then
+  OVERALL="🟢 PASSED"
+  OVERALL_NOTE="No Salesforce metadata to validate"
+  DR_STATUS="🟢 N/A"
+  DR_NOTE="No Salesforce components changed in this PR"
+fi
+
 # Pre-flight scanner outranks deploy status — if it flagged orphaned refs the
 # Salesforce dry-run never got to run, and the merge must be blocked.
 if [ "$DEPENDENCY_ERRORS_PRESENT" = "true" ]; then
