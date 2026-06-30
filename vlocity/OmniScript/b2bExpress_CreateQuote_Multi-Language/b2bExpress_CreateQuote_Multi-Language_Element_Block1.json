@@ -5,7 +5,7 @@
         "VlocityDataPackType": "VlocityMatchingKeyObject",
         "VlocityMatchingRecordSourceKey": "%vlocity_namespace%__OmniScript__c/b2bExpress/CreateQuote/Multi-Language",
         "VlocityRecordSObjectType": "%vlocity_namespace%__OmniScript__c"
-    },
+    }, 
     "%vlocity_namespace%__ParentElementId__c": {
         "%vlocity_namespace%__OmniScriptId__c": {
             "Name": "B2BBrandNewQuote",

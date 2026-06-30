@@ -10,7 +10,7 @@
         "orderBy": {
             "isReverse": "",
             "name": ""
-        },
+        }, 
         "type": "Custom",
         "value": {
             "body": "[\n    {\n        \"Attributes\": {\n            \"VPL_PICKLIST_HANDSET_COLOR\": \"Red\",\n            \"VPL_ATTR_HANDSET_STORAGE_CAPACITY\": \"64\",\n            \"VPL_ATTR_HANDSET_MODEL\": \"iPhone 12\",\n            \"VPL_ATTR_HANDSET_MAKE\": \"Apple\"\n        },\n        \"%vlocity_namespace%__LineNumber__c\": \"0001.0002\",\n\"%vlocity_namespace%__RootItemId__c\": \"0QLRN00000016JQ4AY\",\n        \"Id\": \"0QLRN00000016JQ4AY\",\n        \"%vlocity_namespace%__Product2Id__c\": \"01tRN000000KVzrYAG\",\n        \"%vlocity_namespace%__Product2Id__r.Name\": \"iPhone 12\",\n        \"Quantity\": 1,\n        \"Origin\": \"Current Quote\",\n         \"saved\": true,\n         \"isRootItem\": false\n    }\n]",

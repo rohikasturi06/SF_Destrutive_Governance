@@ -10,8 +10,8 @@
             "namespacePrefix": "",
             "page": ""
         }
-    ],
-    "dataSource": {
+    ], 
+    "dataSource": { 
         "type": null,
         "value": {
             "bundle": "",
