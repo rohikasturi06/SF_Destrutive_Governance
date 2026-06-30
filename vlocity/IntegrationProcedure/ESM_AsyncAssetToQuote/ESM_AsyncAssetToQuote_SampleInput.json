@@ -1,0 +1,24 @@
+{
+    "additionalData": {
+        "AssetIds": [
+            "02iHs00000JptGfIAJ",
+            "02iHs00000JptGXIAZ",
+            "02iHs00000JptGPIAZ"
+        ],
+        "DefaultFieldValues": {
+            "Name": "Temp ATQ Working Cart",
+            "Status": "Draft"
+        },
+        "FieldsToCopy": [
+            "Id",
+            "AccountId",
+            "OpportunityId",
+            "%vlocity_namespace%__PriceListId__c",
+            "%vlocity_namespace%__OriginatingChannel__c",
+            "%vlocity_namespace%__PriceListId__r.Name"
+        ],
+        "QuoteId": "0Q0Hs000003n05pKAA",
+        "accountId": "001Hs00003AE5DfIAL",
+        "isAsyncATQFlow": true
+    }
+}
