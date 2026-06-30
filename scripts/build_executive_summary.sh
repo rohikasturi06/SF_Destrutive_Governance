@@ -439,6 +439,10 @@ elif [ "${HAS_DESTRUCTIVE_CHANGES:-false}" != "true" ]; then
     echo "### 📝 No Salesforce Components Modified"
     echo ""
     echo "_Only pipeline / configuration files changed in this PR. No Salesforce metadata was added, modified, or deleted._"
+    if [ "${VLOCITY_CHANGED_COUNT}" -gt 0 ]; then
+      echo ""
+      echo "_Vlocity files were detected in this PR and are deployed post-merge via the Vlocity deployment stage._"
+    fi
     echo ""
   } >> "$OUTPUT_FILE"
 fi
@@ -449,8 +453,18 @@ fi
 if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   CHANGED_PIPELINE=$(git diff --name-only "origin/${TARGET_BRANCH}" HEAD 2>/dev/null \
                        | grep -E '\.(sh|yml|yaml)$|^\.github/' || true)
+  PIPELINE_COUNT=$(printf '%s\n' "$CHANGED_PIPELINE" | grep -c . || true)
+
+  # Keep this section explicitly visible for Vlocity-only PRs, since reviewers
+  # rely on it as confirmation that the change set is pipeline/config oriented.
+  if [ "${VLOCITY_CHANGED_COUNT}" -gt 0 ]; then
+    {
+      echo "### 🔧 Scripts & Pipeline Configurations (Developer Only) — ${PIPELINE_COUNT} file(s)"
+      echo ""
+    } >> "$OUTPUT_FILE"
+  fi
+
   if [ -n "$CHANGED_PIPELINE" ]; then
-    PIPELINE_COUNT=$(printf '%s\n' "$CHANGED_PIPELINE" | grep -c . || true)
     {
       echo "<details>"
       echo "<summary><strong>🔧 Scripts &amp; Pipeline Configurations (Developer Only)</strong> — ${PIPELINE_COUNT} file(s)</summary>"
