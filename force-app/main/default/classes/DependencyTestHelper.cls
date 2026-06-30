@@ -3,3 +3,4 @@ public with sharing class DependencyTestHelper {
         return [SELECT Id, Test_Text__c FROM Dependency_Test__c LIMIT 10];
     }
 }
+ 
