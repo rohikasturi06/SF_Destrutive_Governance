@@ -27,7 +27,7 @@
 #   VLOCITY_SF_AUTH_URL   - (optional) Vlocity-specific SFDX auth URL; takes
 #                           precedence so the vlocity build can use a separate
 #                           integration user
-#   VLOCITY_JOB_FILE      - path to the vlocity job YAML, default vlocity/deploy.yaml
+#   VLOCITY_JOB_FILE      - path to the vlocity job YAML, default scripts/vlocity_deploy.yaml
 #
 # Outputs:
 #   reports/vlocity/packDeploy.log
@@ -47,7 +47,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/_vlocity_lib.sh"
 
-JOB_FILE="${VLOCITY_JOB_FILE:-vlocity/deploy.yaml}"
+JOB_FILE="${VLOCITY_JOB_FILE:-scripts/vlocity_deploy.yaml}"
 ORG_ALIAS="${ORG_NAME:-sandbox}"
 VLOCITY_ENV_NAME="${ORG_ALIAS}_Vlocity"
 
