@@ -143,10 +143,20 @@ if has_any_deployable; then
   echo ""
 
   summary "🔄 Running validation..."
-  if sf project deploy start "${PRIMARY_ARGS[@]}" > reports/deploy-report.json 2>&1; then
+  # IMPORTANT: keep stdout (the --json payload) PURE. Do NOT use `2>&1` here — the
+  # sf/Node CLI writes warnings to stderr (e.g. "(node:...) DeprecationWarning:
+  # punycode"), which would be prepended to the JSON and make every downstream
+  # `jq` read fail -> coverage misreported as 0% and status as "Failed". Send
+  # stderr to a separate log instead.
+  if sf project deploy start "${PRIMARY_ARGS[@]}" > reports/deploy-report.json 2>reports/deploy-report.stderr.log; then
     summary "✅ Validation passed (${PRIMARY_TEST_LEVEL})"
   else
     summary "⚠️  Validation failed with primary strategy"
+  fi
+  # Surface any real CLI stderr for debugging without polluting the JSON report.
+  if [ -s reports/deploy-report.stderr.log ]; then
+    echo "ℹ️  sf stderr (non-fatal warnings):"
+    sed 's/^/   /' reports/deploy-report.stderr.log | head -20 || true
   fi
 
   # Compute coverage from primary attempt
