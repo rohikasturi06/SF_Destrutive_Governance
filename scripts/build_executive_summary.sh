@@ -115,10 +115,14 @@ DEPLOY_STATUS="Unknown"
 COMPONENT_FAILURES=0
 TEST_FAILURES=0
 COVERAGE=0
-# Distinguish "coverage measured as 0%" from "no coverage data was reported at
-# all" (e.g. NoTestRun, or Salesforce ran no tests that touch the changed
-# classes). Only the former should ever render red — the latter is N/A.
-HAS_COVERAGE_DATA="false"
+
+# Effective Apex test level actually executed for this run, recorded by
+# validate_deployment.sh. Drives the Coverage row entirely: the value shown is
+# based on the developer's test-run preference (or the auto-resolved level).
+#   NoTestRun / empty  -> no tests ran, so there is no coverage to report
+#   NO_TEST_FOUND       -> Apex changed but no test class could be mapped (error)
+#   <any run level>     -> print the measured coverage value vs the threshold
+EFFECTIVE_TEST_LEVEL="$(tr -d '[:space:]' < reports/test-level.txt 2>/dev/null || true)"
 
 if [ -f reports/deploy-report.json ]; then
   DEPLOY_STATUS=$(jq -r '.result.status // "Unknown"' reports/deploy-report.json 2>/dev/null || echo Unknown)
@@ -128,9 +132,7 @@ if [ -f reports/deploy-report.json ]; then
   if jq -e '.result.details.runTestResult.failures' reports/deploy-report.json >/dev/null 2>&1; then
     TEST_FAILURES=$(jq '.result.details.runTestResult.failures | length' reports/deploy-report.json 2>/dev/null || echo 0)
   fi
-  # Coverage data only counts if the codeCoverage array is actually non-empty.
-  if jq -e '(.result.details.runTestResult.codeCoverage // []) | length > 0' reports/deploy-report.json >/dev/null 2>&1; then
-    HAS_COVERAGE_DATA="true"
+  if jq -e '.result.details.runTestResult.codeCoverage' reports/deploy-report.json >/dev/null 2>&1; then
     COVERAGE=$(jq -r '[.result.details.runTestResult.codeCoverage[]? | (.coveredPercent // 0)] | (if length>0 then (add/length|floor) else 0 end)' reports/deploy-report.json 2>/dev/null || echo 0)
   fi
 fi
@@ -140,11 +142,6 @@ LWC_VIOLATIONS=0
 [ -f reports/apex.json ] && APEX_VIOLATIONS=$(jq '.violations | length' reports/apex.json 2>/dev/null || echo 0)
 [ -f reports/lwc.json ]  && LWC_VIOLATIONS=$(jq '.violations | length'  reports/lwc.json  2>/dev/null || echo 0)
 TOTAL_VIOLATIONS=$((APEX_VIOLATIONS + LWC_VIOLATIONS))
-
-HAS_APEX_CHANGES="false"
-if has_source_metadata && find "$DELTA_SOURCE_DIR" \( -name '*.cls' -o -name '*.trigger' \) 2>/dev/null | grep -q .; then
-  HAS_APEX_CHANGES="true"
-fi
 
 # ------------------------------------------------------------------------------
 # Health & Safety derivations
@@ -198,26 +195,28 @@ else
   CQ_NOTE="Apex: ${APEX_VIOLATIONS}, LWC: ${LWC_VIOLATIONS}"
 fi
 
-if [ "$HAS_APEX_CHANGES" = "true" ]; then
-  if [ "$HAS_COVERAGE_DATA" = "true" ]; then
+# Coverage row is driven entirely by the effective test level (the developer's
+# test-run preference, or the auto-resolved level). We print the coverage VALUE
+# only when tests actually ran.
+case "$EFFECTIVE_TEST_LEVEL" in
+  NO_TEST_FOUND)
+    COV_STATUS="🔴 No Apex test found"
+    COV_NOTE="Apex changed but no test class covers it — add a *Test class"
+    ;;
+  ""|NoTestRun)
+    COV_STATUS="⚪ No test run"
+    COV_NOTE="NoTestRun — no Apex tests were executed for this run"
+    ;;
+  *)
     if [ "${COVERAGE:-0}" -ge "$COVERAGE_THRESHOLD" ]; then
       COV_STATUS="🟢 ${COVERAGE}%"
-      COV_NOTE="≥ ${COVERAGE_THRESHOLD}% threshold"
+      COV_NOTE="${EFFECTIVE_TEST_LEVEL} · ≥ ${COVERAGE_THRESHOLD}% threshold"
     else
       COV_STATUS="🔴 ${COVERAGE}%"
-      COV_NOTE="< ${COVERAGE_THRESHOLD}% threshold"
+      COV_NOTE="${EFFECTIVE_TEST_LEVEL} · < ${COVERAGE_THRESHOLD}% threshold"
     fi
-  else
-    # Apex changed but Salesforce reported no coverage figures. This is NOT a
-    # measured 0% — it means no test exercised the changed classes in this run.
-    # Show it as neutral so it never contradicts a PASSED dry-run.
-    COV_STATUS="⚪ N/A"
-    COV_NOTE="No coverage data reported — no Apex tests ran against the changed classes"
-  fi
-else
-  COV_STATUS="🟢 N/A"
-  COV_NOTE="No custom code (Apex) was modified"
-fi
+    ;;
+esac
 
 # ------------------------------------------------------------------------------
 # Header

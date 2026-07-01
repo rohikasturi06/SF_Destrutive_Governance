@@ -233,15 +233,13 @@ case " $PERMITTED " in
   *) die "Test level '$RESOLVED_LEVEL' is not permitted for target '$RESOLVED_ENV'. Production requires a minimum of RunLocalTests for Apex; NoTestRun is restricted to sandboxes." ;;
 esac
 
-# 2b. RunSpecifiedTests needs at least one class. If none were provided AND none
-#     could be auto-discovered from the delta, don't hard-fail the run — safely
-#     downgrade to RunLocalTests so meaningful coverage still executes. (The
-#     downstream deploy arg builder does the same fallback; this keeps the
-#     resolved level honest and the run un-blocked.)
+# 2b. RunSpecifiedTests needs at least one class. If the developer EXPLICITLY
+#     picked RunSpecifiedTests but supplied no classes AND none could be
+#     auto-discovered from the change set (map_tests.sh → RELATED_TESTS), fail
+#     the run with a clear, actionable error. We do NOT silently downgrade — the
+#     policy is: Apex must have a test class, or the pipeline errors.
 if [ "$RESOLVED_LEVEL" = "RunSpecifiedTests" ] && [ -z "$RESOLVED_TESTS" ]; then
-  info "⚠️  RunSpecifiedTests requested, but no test classes were provided or auto-discovered from the change set."
-  info "    Falling back to RunLocalTests so validation still runs real Apex tests."
-  RESOLVED_LEVEL="RunLocalTests"
+  die "RunSpecifiedTests was selected but no Apex test class could be found. Provide one inline (e.g. '- [x] RunSpecifiedTests: MyClassTest'), add a *Test class that covers the changed code, or choose RunLocalTests / RunAllTestsInOrg."
 fi
 
 # 2c. 8 KB REST header guardrail for the --tests parameter.

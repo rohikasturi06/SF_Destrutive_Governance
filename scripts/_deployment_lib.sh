@@ -184,15 +184,23 @@ PY
 # select_test_args <out-array-name>
 # Echoes test selection flags for `sf project deploy start`.
 # Inputs (env): FORCE_TEST_LEVEL, FORCE_SPECIFIED_TESTS, RELATED_TESTS,
-#               DELTA_SOURCE_DIR
+#               DELTA_SOURCE_DIR, REQUIRE_APEX_TESTS
 # Behavior:
 #   - If FORCE_TEST_LEVEL is set (developer explicitly picked a level via PR
-#     label / checkbox / dispatch), honor it verbatim. This is the override that
-#     replaces the standalone Quality Gate Orchestrator. It is UNSET on
-#     post-merge deploys, so their behavior is unchanged.
-#   - Else if RELATED_TESTS is set, use RunSpecifiedTests with that CSV
-#   - Else if delta has Apex (.cls/.trigger), use RunLocalTests
-#   - Else NoTestRun (metadata-only, including destructive-only)
+#     label / checkbox / dispatch), honor it verbatim.
+#       * RunSpecifiedTests uses FORCE_SPECIFIED_TESTS, else the auto-discovered
+#         RELATED_TESTS. If BOTH are empty it emits "--test-level
+#         RunSpecifiedTests" WITHOUT any "--tests" — an intentionally invalid
+#         plan the caller detects and turns into a hard, explained error.
+#   - Else (no explicit selection — the AUTOMATIC path):
+#       * If Apex (.cls/.trigger) changed:
+#           - use RunSpecifiedTests with RELATED_TESTS when present;
+#           - if no test class was discovered:
+#               · REQUIRE_APEX_TESTS=true (PR validation)  -> emit
+#                 RunSpecifiedTests WITHOUT --tests so the caller errors out
+#                 ("Apex changed but no test class found");
+#               · otherwise (legacy / post-merge deploy)   -> RunLocalTests.
+#       * Else (no Apex) -> NoTestRun. This is the "nothing to test" default.
 # ------------------------------------------------------------------------------
 select_test_args() {
   local _csv
@@ -205,8 +213,9 @@ select_test_args() {
         if [ -n "$_csv" ]; then
           printf '%s\n' "--test-level" "RunSpecifiedTests" "--tests" "$_csv"
         else
-          # No classes supplied — fall back safely to RunLocalTests.
-          printf '%s\n' "--test-level" "RunLocalTests"
+          # No classes supplied or discovered — emit an intentionally
+          # test-less RunSpecifiedTests so the caller fails with a clear error.
+          printf '%s\n' "--test-level" "RunSpecifiedTests"
         fi
         return 0
         ;;
@@ -217,20 +226,28 @@ select_test_args() {
     esac
   fi
 
+  # Automatic path: prefer the auto-discovered tests.
   if [ -n "${RELATED_TESTS:-}" ]; then
     _csv=$(echo "$RELATED_TESTS" | xargs -n1 | paste -sd, - || echo "")
   fi
-
   if [ -n "${_csv:-}" ]; then
     printf '%s\n' "--test-level" "RunSpecifiedTests" "--tests" "$_csv"
     return 0
   fi
 
+  # No tests discovered. Decide based on whether Apex actually changed.
   if has_source_metadata && find "$DELTA_SOURCE_DIR" \( -name '*.cls' -o -name '*.trigger' \) 2>/dev/null | grep -q .; then
-    printf '%s\n' "--test-level" "RunLocalTests"
+    if [ "${REQUIRE_APEX_TESTS:-false}" = "true" ]; then
+      # PR validation: Apex present but no test found → invalid plan (caller errors).
+      printf '%s\n' "--test-level" "RunSpecifiedTests"
+    else
+      # Legacy / post-merge deploy: keep the safe RunLocalTests fallback.
+      printf '%s\n' "--test-level" "RunLocalTests"
+    fi
     return 0
   fi
 
+  # Nothing to test (metadata-only / destructive-only). This is the default.
   printf '%s\n' "--test-level" "NoTestRun"
 }
 

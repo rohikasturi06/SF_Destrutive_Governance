@@ -34,6 +34,16 @@ mkdir -p reports
 echo '{"result":{"status":"Failed","message":"No deploy run performed"}}' > reports/deploy-report.json
 echo "" > reports/validation-summary.txt
 
+# PR validation is STRICT about Apex tests: if Apex changed and no test class can
+# be found/mapped, the run must fail (not silently fall back to RunLocalTests).
+# select_test_args() reads this. Post-merge deploy.sh does NOT set it, so its
+# behavior is unchanged.
+export REQUIRE_APEX_TESTS="true"
+
+# Effective test level actually used for this run, surfaced to the executive
+# summary (reports/test-level.txt). Overwritten below once resolved.
+echo "NoTestRun" > reports/test-level.txt
+
 # Single source of truth for downstream steps. We default to "failure" so that
 # any unexpected `set -e` exit, killed subshell, or early crash is faithfully
 # reported instead of triggering a confusing "validation_result.txt missing"
@@ -94,9 +104,30 @@ if has_any_deployable; then
     fi
   done
   summary "🧪 Test Strategy: ${PRIMARY_TEST_LEVEL}"
-  if [ "$PRIMARY_TEST_LEVEL" = "RunSpecifiedTests" ] && [ -n "${RELATED_TESTS:-}" ]; then
-    RELATED_TESTS_CSV=$(echo "$RELATED_TESTS" | xargs -n1 | paste -sd, - || echo "")
-    summary "   Tests: ${RELATED_TESTS_CSV}"
+  echo "$PRIMARY_TEST_LEVEL" > reports/test-level.txt
+
+  # Is there an explicit --tests list in the resolved plan?
+  PRIMARY_HAS_TESTS="false"
+  for ((i=0; i<${#PRIMARY_ARGS[@]}; i++)); do
+    if [ "${PRIMARY_ARGS[$i]}" = "--tests" ]; then
+      PRIMARY_HAS_TESTS="true"
+      break
+    fi
+  done
+
+  # HARD GATE: Apex changed but no test class could be found/mapped. RunSpecifiedTests
+  # with an empty --tests list is an invalid, wasteful run — fail fast with an
+  # actionable message instead of shipping untested Apex.
+  if [ "$PRIMARY_TEST_LEVEL" = "RunSpecifiedTests" ] && [ "$PRIMARY_HAS_TESTS" = "false" ]; then
+    echo "NO_TEST_FOUND" > reports/test-level.txt
+    summary "❌ Apex changes detected, but NO Apex test class could be found or mapped to them."
+    echo "::error::Apex was modified but no test class covers it. Add a *Test class that exercises the changed class(es) (or explicitly choose RunLocalTests / RunAllTestsInOrg in the PR), then re-run."
+    record_result failure
+    exit 1
+  fi
+
+  if [ "$PRIMARY_TEST_LEVEL" = "RunSpecifiedTests" ]; then
+    summary "   Tests: $(printf '%s ' "${PRIMARY_ARGS[@]}" | tr ' ' '\n' | awk '/^--tests$/{getline; print}' | paste -sd, - || echo "")"
   fi
 
   echo ""
