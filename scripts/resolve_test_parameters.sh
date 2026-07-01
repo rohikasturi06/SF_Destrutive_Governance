@@ -38,6 +38,10 @@ EVENT_NAME="${EVENT_NAME:-}"
 GITHUB_EVENT_PATH="${GITHUB_EVENT_PATH:-}"
 TARGET_BRANCH="${TARGET_BRANCH:-}"
 MAX_TESTS_HEADER_BYTES="${MAX_TESTS_HEADER_BYTES:-8192}"   # 8 KB REST header cap
+# Auto-discovered test classes from the delta (set by scripts/map_tests.sh into
+# $GITHUB_ENV, which the workflow injects into this step's environment). Used as
+# the fallback list when RunSpecifiedTests is chosen without explicit classes.
+RELATED_TESTS="${RELATED_TESTS:-}"
 
 VALID_LEVELS="NoTestRun RunSpecifiedTests RunLocalTests RunAllTestsInOrg"
 
@@ -65,11 +69,28 @@ read_pr_labels() {
   jq -r '.pull_request.labels[]?.name // empty' "$GITHUB_EVENT_PATH" 2>/dev/null || echo ""
 }
 
-# Extract the class list that follows the "Specified Target Apex Classes" header.
-# Stops at the next blank line, bold header, checkbox, or closing code fence so a
-# malformed body cannot run away. Code-fence markers are stripped.
+# Extract the class list for RunSpecifiedTests. Two supported forms:
+#   (a) Inline on the selected checkbox line (preferred, keeps the PR body tiny):
+#         - [x] RunSpecifiedTests: ClassA, ClassB
+#   (b) Legacy block after a "Specified ... Apex Classes" header (back-compat with
+#       older PRs / the workflow_dispatch flow). Stops at the next blank line,
+#       bold header, checkbox, or closing code fence so a malformed body cannot
+#       run away. Code-fence markers are stripped.
 extract_specified_tests() {
   local body="$1"
+
+  # (a) Inline form: text after "RunSpecifiedTests:" on the checked line.
+  local inline
+  inline="$(printf '%s\n' "$body" \
+    | grep -iE '^[[:space:]]*- \[x\][[:space:]]+RunSpecifiedTests[[:space:]]*:' \
+    | head -n1 \
+    | sed -E 's/^[[:space:]]*-[[:space:]]*\[[xX]\][[:space:]]*RunSpecifiedTests[[:space:]]*:[[:space:]]*//' )"
+  if [ -n "$(printf '%s' "$inline" | tr -d '[:space:]')" ]; then
+    printf '%s' "$inline" | tr ',' ' ' | tr -s ' ' | sed 's/^ *//; s/ *$//'
+    return
+  fi
+
+  # (b) Legacy header block.
   printf '%s\n' "$body" \
     | awk '
         f==1 {
@@ -79,7 +100,7 @@ extract_specified_tests() {
           if ($0 ~ /^[[:space:]]*- \[/)     { exit }
           print
         }
-        /Specified Target Apex Classes/ { f=1 }
+        /Specified .*Apex Classes/ { f=1 }
       ' \
     | tr ',' ' ' | tr '\n' ' ' | tr -s ' ' \
     | sed 's/^ *//; s/ *$//'
@@ -120,26 +141,41 @@ else
 
   PR_BODY="$(read_pr_body)"
   # Normalize "[X]" -> "[x]" so either casing of a checked box is recognized.
-  PR_BODY="$(printf '%s' "$PR_BODY" | sed 's/- \[X\]/- [x]/g')"
+  # (The checkbox greps below are also case-insensitive, so both work regardless.)
+  PR_BODY="$(printf '%s' "$PR_BODY" | sed 's/-[[:space:]]*\[X\]/- [x]/g')"
+
+  # 1b. Markdown checkbox parsing — done INDEPENDENTLY of labels so we can detect
+  #     a conflict. Matches a plain checked box: "- [x] RunSpecifiedTests"
+  #     (optionally "- [x] RunSpecifiedTests: ClassA, ClassB"). Case-insensitive
+  #     on "[x]"; the trailing "([[:space:]]|:|$)" anchors the level name.
+  CHECKBOX_MATCH=""
+  if   printf '%s' "$PR_BODY" | grep -qiE '^[[:space:]]*- \[x\][[:space:]]+NoTestRun([[:space:]]|:|$)'; then
+    CHECKBOX_MATCH="NoTestRun"
+  elif printf '%s' "$PR_BODY" | grep -qiE '^[[:space:]]*- \[x\][[:space:]]+RunSpecifiedTests([[:space:]]|:|$)'; then
+    CHECKBOX_MATCH="RunSpecifiedTests"
+  elif printf '%s' "$PR_BODY" | grep -qiE '^[[:space:]]*- \[x\][[:space:]]+RunAllTestsInOrg([[:space:]]|:|$)'; then
+    CHECKBOX_MATCH="RunAllTestsInOrg"
+  elif printf '%s' "$PR_BODY" | grep -qiE '^[[:space:]]*- \[x\][[:space:]]+RunLocalTests([[:space:]]|:|$)'; then
+    CHECKBOX_MATCH="RunLocalTests"
+  fi
+
+  # HARD STOP: if BOTH a label and a checkbox are set and they DISAGREE, fail
+  # loudly instead of silently picking one. Forces the developer to make the two
+  # inputs identical (or use only one) before any org validation runs.
+  if [ -n "$LABEL_MATCH" ] && [ -n "$CHECKBOX_MATCH" ] && [ "$LABEL_MATCH" != "$CHECKBOX_MATCH" ]; then
+    die "Conflicting Apex test level: PR label selects '$LABEL_MATCH' but the PR checkbox selects '$CHECKBOX_MATCH'. Set BOTH to the same level (or use only one) and re-run."
+  fi
 
   if [ -n "$LABEL_MATCH" ]; then
     info "🏷  Matched level via label: $LABEL_MATCH"
     RESOLVED_LEVEL="$LABEL_MATCH"
     SELECTION_SOURCE="label"
+  elif [ -n "$CHECKBOX_MATCH" ]; then
+    info "🧾 Matched level via checkbox: $CHECKBOX_MATCH"
+    RESOLVED_LEVEL="$CHECKBOX_MATCH"
+    SELECTION_SOURCE="checkbox"
   else
-    # 1b. Markdown checkbox parsing (fixed-string match; brackets are literal).
-    info "🧾 No label match — evaluating PR body checkboxes"
-    if   printf '%s' "$PR_BODY" | grep -qF -- '- [x] `- [ ] NoTestRun`'; then
-      RESOLVED_LEVEL="NoTestRun"; SELECTION_SOURCE="checkbox"
-    elif printf '%s' "$PR_BODY" | grep -qF -- '- [x] `- [ ] RunSpecifiedTests`'; then
-      RESOLVED_LEVEL="RunSpecifiedTests"; SELECTION_SOURCE="checkbox"
-    elif printf '%s' "$PR_BODY" | grep -qF -- '- [x] `- [ ] RunAllTestsInOrg`'; then
-      RESOLVED_LEVEL="RunAllTestsInOrg"; SELECTION_SOURCE="checkbox"
-    elif printf '%s' "$PR_BODY" | grep -qF -- '- [x] `- [ ] RunLocalTests`'; then
-      RESOLVED_LEVEL="RunLocalTests"; SELECTION_SOURCE="checkbox"
-    else
-      info "ℹ️  No checkbox checked — defaulting to RunLocalTests"
-    fi
+    info "ℹ️  No label or checkbox — defaulting to RunLocalTests"
   fi
 
   # Specified tests are only meaningful for RunSpecifiedTests.
@@ -160,6 +196,16 @@ fi
 
 # Normalize the test list to a single-space-separated string of class names.
 RESOLVED_TESTS="$(printf '%s' "$RESOLVED_TESTS" | tr ',' ' ' | tr -s ' \t' ' ' | sed 's/^ *//; s/ *$//')"
+
+# Auto-discovery fallback: if RunSpecifiedTests was requested but no classes were
+# provided explicitly (PR body / dispatch field), adopt the test classes the
+# pipeline already discovered from the change set (map_tests.sh → RELATED_TESTS).
+# This is what makes "just pick RunSpecifiedTests and let the pipeline find the
+# tests" work without hand-typing class names.
+if [ "$RESOLVED_LEVEL" = "RunSpecifiedTests" ] && [ -z "$RESOLVED_TESTS" ] && [ -n "$RELATED_TESTS" ]; then
+  RESOLVED_TESTS="$(printf '%s' "$RELATED_TESTS" | tr ',' ' ' | tr -s ' \t' ' ' | sed 's/^ *//; s/ *$//')"
+  info "🔎 No explicit test classes provided — auto-selected from the change set: $RESOLVED_TESTS"
+fi
 
 info "   • test_level     = $RESOLVED_LEVEL"
 info "   • target_env     = $RESOLVED_ENV"
@@ -187,9 +233,15 @@ case " $PERMITTED " in
   *) die "Test level '$RESOLVED_LEVEL' is not permitted for target '$RESOLVED_ENV'. Production requires a minimum of RunLocalTests for Apex; NoTestRun is restricted to sandboxes." ;;
 esac
 
-# 2b. RunSpecifiedTests must declare at least one class.
+# 2b. RunSpecifiedTests needs at least one class. If none were provided AND none
+#     could be auto-discovered from the delta, don't hard-fail the run — safely
+#     downgrade to RunLocalTests so meaningful coverage still executes. (The
+#     downstream deploy arg builder does the same fallback; this keeps the
+#     resolved level honest and the run un-blocked.)
 if [ "$RESOLVED_LEVEL" = "RunSpecifiedTests" ] && [ -z "$RESOLVED_TESTS" ]; then
-  die "RunSpecifiedTests was selected but no target test classes were provided. List them under '**Specified Target Apex Classes ...**' (PR body) or the dispatch 'specified_tests' field."
+  info "⚠️  RunSpecifiedTests requested, but no test classes were provided or auto-discovered from the change set."
+  info "    Falling back to RunLocalTests so validation still runs real Apex tests."
+  RESOLVED_LEVEL="RunLocalTests"
 fi
 
 # 2c. 8 KB REST header guardrail for the --tests parameter.

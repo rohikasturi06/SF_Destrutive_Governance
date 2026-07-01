@@ -9,7 +9,7 @@
 #   - Source metadata validation (delta/force-app)
 #   - Destructive change validation (delta/destructiveChanges/destructiveChanges.xml)
 #   - Destructive-only PRs (no source metadata, only deletions)
-#   - Test selection: RunSpecifiedTests → RunLocalTests fallback for Apex
+#   - Test selection honors the resolved/selected level (no RunLocalTests fallback)
 #   - NoTestRun for metadata-only and destructive-only changes
 #
 # Output:
@@ -127,58 +127,13 @@ if has_any_deployable; then
   summary "📊 Coverage: ${COVERAGE}%"
 
   # ----------------------------------------------------------------------------
-  # Fallback: only meaningful when Apex is in the delta and we used
-  # RunSpecifiedTests. Retry with RunLocalTests to recover coverage/status.
+  # NOTE: The automatic "RunLocalTests fallback" was intentionally REMOVED.
+  # Previously, when the primary strategy was RunSpecifiedTests and coverage was
+  # below threshold, the script fired a SECOND `sf project deploy start` with
+  # RunLocalTests — producing a second validation in the org and overwriting the
+  # first report. We now run EXACTLY ONE validation with the selected test level;
+  # there is no second org validation.
   # ----------------------------------------------------------------------------
-  if [ "$PRIMARY_TEST_LEVEL" = "RunSpecifiedTests" ] && [ "$HAS_APEX_IN_DELTA" = "true" ]; then
-    NEEDS_FALLBACK="false"
-    if jq -e '.result.status != "Succeeded"' reports/deploy-report.json >/dev/null 2>&1; then
-      NEEDS_FALLBACK="true"
-    fi
-    if [ "${COVERAGE:-0}" -lt "${COVERAGE_THRESHOLD:-75}" ]; then
-      NEEDS_FALLBACK="true"
-    fi
-
-    if [ "$NEEDS_FALLBACK" = "true" ]; then
-      summary "🔄 Fallback: RunLocalTests (coverage < ${COVERAGE_THRESHOLD:-75}% or validation failed)"
-
-      # Re-build args without test selection, then append RunLocalTests.
-      declare -a FALLBACK_ARGS=()
-      i=0
-      while [ $i -lt ${#PRIMARY_ARGS[@]} ]; do
-        case "${PRIMARY_ARGS[$i]}" in
-          --test-level|--tests)
-            i=$((i + 2))
-            continue
-            ;;
-        esac
-        FALLBACK_ARGS+=("${PRIMARY_ARGS[$i]}")
-        i=$((i + 1))
-      done
-      FALLBACK_ARGS+=("--test-level" "RunLocalTests")
-
-      echo ""
-      echo "📋 Fallback Validation:"
-      echo "  • Mode: Dry-run (check-only)"
-      echo "  • Tests: All local tests in org"
-      echo ""
-
-      if sf project deploy start "${FALLBACK_ARGS[@]}" > reports/deploy-report-coverage.json 2>&1; then
-        summary "✅ Fallback validation passed"
-      else
-        summary "❌ Fallback validation failed"
-      fi
-      mv reports/deploy-report-coverage.json reports/deploy-report.json || true
-
-      if [ -f reports/deploy-report.json ]; then
-        ERROR_MSG=$(jq -r '.message // .result.message // "Unknown error"' reports/deploy-report.json 2>/dev/null || echo "Failed to parse error details")
-        if [ -n "$ERROR_MSG" ] && [ "$ERROR_MSG" != "null" ]; then
-          echo "  ↪ ${ERROR_MSG}" | head -c 500
-          echo ""
-        fi
-      fi
-    fi
-  fi
 
   # ----------------------------------------------------------------------------
   # Direct link to the org's Deployment Status page for fast triage.
