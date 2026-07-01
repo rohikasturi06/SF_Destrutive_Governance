@@ -202,21 +202,27 @@ PY
 #               · otherwise (legacy / post-merge deploy)   -> RunLocalTests.
 #       * Else (no Apex) -> NoTestRun. This is the "nothing to test" default.
 # ------------------------------------------------------------------------------
-select_test_args() {
-  local _csv
+# Emit "--test-level RunSpecifiedTests" then one "--tests <name>" per class.
+# The Salesforce CLI no longer accepts a comma-separated --tests value: it treats
+# "A,B,C" as a single bogus test name and runs NOTHING (the org then shows
+# "No tests run" / 0% coverage). The flag MUST be repeated. With no test names it
+# emits a test-less RunSpecifiedTests so the caller can raise a clear error.
+_emit_run_specified_tests() {
+  local raw t
+  raw=$(printf '%s' "${1:-}" | tr ',\t\n' '   ')
+  printf '%s\n' "--test-level" "RunSpecifiedTests"
+  for t in $raw; do
+    [ -z "$t" ] && continue
+    printf '%s\n' "--tests" "$t"
+  done
+}
 
+select_test_args() {
   # Explicit developer override (PR label / checkbox / manual dispatch).
   if [ -n "${FORCE_TEST_LEVEL:-}" ]; then
     case "$FORCE_TEST_LEVEL" in
       RunSpecifiedTests)
-        _csv=$(echo "${FORCE_SPECIFIED_TESTS:-${RELATED_TESTS:-}}" | xargs -n1 | paste -sd, - || echo "")
-        if [ -n "$_csv" ]; then
-          printf '%s\n' "--test-level" "RunSpecifiedTests" "--tests" "$_csv"
-        else
-          # No classes supplied or discovered — emit an intentionally
-          # test-less RunSpecifiedTests so the caller fails with a clear error.
-          printf '%s\n' "--test-level" "RunSpecifiedTests"
-        fi
+        _emit_run_specified_tests "${FORCE_SPECIFIED_TESTS:-${RELATED_TESTS:-}}"
         return 0
         ;;
       NoTestRun|RunLocalTests|RunAllTestsInOrg)
@@ -228,10 +234,7 @@ select_test_args() {
 
   # Automatic path: prefer the auto-discovered tests.
   if [ -n "${RELATED_TESTS:-}" ]; then
-    _csv=$(echo "$RELATED_TESTS" | xargs -n1 | paste -sd, - || echo "")
-  fi
-  if [ -n "${_csv:-}" ]; then
-    printf '%s\n' "--test-level" "RunSpecifiedTests" "--tests" "$_csv"
+    _emit_run_specified_tests "$RELATED_TESTS"
     return 0
   fi
 
