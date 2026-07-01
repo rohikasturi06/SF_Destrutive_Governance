@@ -9,7 +9,7 @@
 #   - Source metadata validation (delta/force-app)
 #   - Destructive change validation (delta/destructiveChanges/destructiveChanges.xml)
 #   - Destructive-only PRs (no source metadata, only deletions)
-#   - Test selection: RunSpecifiedTests → RunLocalTests fallback for Apex
+#   - Test selection honors the resolved/selected level (no RunLocalTests fallback)
 #   - NoTestRun for metadata-only and destructive-only changes
 #
 # Output:
@@ -33,6 +33,16 @@ echo "🔍 Validating deployment with check-only mode (no actual deployment)..."
 mkdir -p reports
 echo '{"result":{"status":"Failed","message":"No deploy run performed"}}' > reports/deploy-report.json
 echo "" > reports/validation-summary.txt
+
+# PR validation is STRICT about Apex tests: if Apex changed and no test class can
+# be found/mapped, the run must fail (not silently fall back to RunLocalTests).
+# select_test_args() reads this. Post-merge deploy.sh does NOT set it, so its
+# behavior is unchanged.
+export REQUIRE_APEX_TESTS="true"
+
+# Effective test level actually used for this run, surfaced to the executive
+# summary (reports/test-level.txt). Overwritten below once resolved.
+echo "NoTestRun" > reports/test-level.txt
 
 # Single source of truth for downstream steps. We default to "failure" so that
 # any unexpected `set -e` exit, killed subshell, or early crash is faithfully
@@ -94,9 +104,30 @@ if has_any_deployable; then
     fi
   done
   summary "🧪 Test Strategy: ${PRIMARY_TEST_LEVEL}"
-  if [ "$PRIMARY_TEST_LEVEL" = "RunSpecifiedTests" ] && [ -n "${RELATED_TESTS:-}" ]; then
-    RELATED_TESTS_CSV=$(echo "$RELATED_TESTS" | xargs -n1 | paste -sd, - || echo "")
-    summary "   Tests: ${RELATED_TESTS_CSV}"
+  echo "$PRIMARY_TEST_LEVEL" > reports/test-level.txt
+
+  # Is there an explicit --tests list in the resolved plan?
+  PRIMARY_HAS_TESTS="false"
+  for ((i=0; i<${#PRIMARY_ARGS[@]}; i++)); do
+    if [ "${PRIMARY_ARGS[$i]}" = "--tests" ]; then
+      PRIMARY_HAS_TESTS="true"
+      break
+    fi
+  done
+
+  # HARD GATE: Apex changed but no test class could be found/mapped. RunSpecifiedTests
+  # with an empty --tests list is an invalid, wasteful run — fail fast with an
+  # actionable message instead of shipping untested Apex.
+  if [ "$PRIMARY_TEST_LEVEL" = "RunSpecifiedTests" ] && [ "$PRIMARY_HAS_TESTS" = "false" ]; then
+    echo "NO_TEST_FOUND" > reports/test-level.txt
+    summary "❌ Apex changes detected, but NO Apex test class could be found or mapped to them."
+    echo "::error::Apex was modified but no test class covers it. Add a *Test class that exercises the changed class(es) (or explicitly choose RunLocalTests / RunAllTestsInOrg in the PR), then re-run."
+    record_result failure
+    exit 1
+  fi
+
+  if [ "$PRIMARY_TEST_LEVEL" = "RunSpecifiedTests" ]; then
+    summary "   Tests: $(printf '%s ' "${PRIMARY_ARGS[@]}" | tr ' ' '\n' | awk '/^--tests$/{getline; print}' | paste -sd, - || echo "")"
   fi
 
   echo ""
@@ -112,10 +143,20 @@ if has_any_deployable; then
   echo ""
 
   summary "🔄 Running validation..."
-  if sf project deploy start "${PRIMARY_ARGS[@]}" > reports/deploy-report.json 2>&1; then
+  # IMPORTANT: keep stdout (the --json payload) PURE. Do NOT use `2>&1` here — the
+  # sf/Node CLI writes warnings to stderr (e.g. "(node:...) DeprecationWarning:
+  # punycode"), which would be prepended to the JSON and make every downstream
+  # `jq` read fail -> coverage misreported as 0% and status as "Failed". Send
+  # stderr to a separate log instead.
+  if sf project deploy start "${PRIMARY_ARGS[@]}" > reports/deploy-report.json 2>reports/deploy-report.stderr.log; then
     summary "✅ Validation passed (${PRIMARY_TEST_LEVEL})"
   else
     summary "⚠️  Validation failed with primary strategy"
+  fi
+  # Surface any real CLI stderr for debugging without polluting the JSON report.
+  if [ -s reports/deploy-report.stderr.log ]; then
+    echo "ℹ️  sf stderr (non-fatal warnings):"
+    sed 's/^/   /' reports/deploy-report.stderr.log | head -20 || true
   fi
 
   # Compute coverage from primary attempt
@@ -127,58 +168,13 @@ if has_any_deployable; then
   summary "📊 Coverage: ${COVERAGE}%"
 
   # ----------------------------------------------------------------------------
-  # Fallback: only meaningful when Apex is in the delta and we used
-  # RunSpecifiedTests. Retry with RunLocalTests to recover coverage/status.
+  # NOTE: The automatic "RunLocalTests fallback" was intentionally REMOVED.
+  # Previously, when the primary strategy was RunSpecifiedTests and coverage was
+  # below threshold, the script fired a SECOND `sf project deploy start` with
+  # RunLocalTests — producing a second validation in the org and overwriting the
+  # first report. We now run EXACTLY ONE validation with the selected test level;
+  # there is no second org validation.
   # ----------------------------------------------------------------------------
-  if [ "$PRIMARY_TEST_LEVEL" = "RunSpecifiedTests" ] && [ "$HAS_APEX_IN_DELTA" = "true" ]; then
-    NEEDS_FALLBACK="false"
-    if jq -e '.result.status != "Succeeded"' reports/deploy-report.json >/dev/null 2>&1; then
-      NEEDS_FALLBACK="true"
-    fi
-    if [ "${COVERAGE:-0}" -lt "${COVERAGE_THRESHOLD:-75}" ]; then
-      NEEDS_FALLBACK="true"
-    fi
-
-    if [ "$NEEDS_FALLBACK" = "true" ]; then
-      summary "🔄 Fallback: RunLocalTests (coverage < ${COVERAGE_THRESHOLD:-75}% or validation failed)"
-
-      # Re-build args without test selection, then append RunLocalTests.
-      declare -a FALLBACK_ARGS=()
-      i=0
-      while [ $i -lt ${#PRIMARY_ARGS[@]} ]; do
-        case "${PRIMARY_ARGS[$i]}" in
-          --test-level|--tests)
-            i=$((i + 2))
-            continue
-            ;;
-        esac
-        FALLBACK_ARGS+=("${PRIMARY_ARGS[$i]}")
-        i=$((i + 1))
-      done
-      FALLBACK_ARGS+=("--test-level" "RunLocalTests")
-
-      echo ""
-      echo "📋 Fallback Validation:"
-      echo "  • Mode: Dry-run (check-only)"
-      echo "  • Tests: All local tests in org"
-      echo ""
-
-      if sf project deploy start "${FALLBACK_ARGS[@]}" > reports/deploy-report-coverage.json 2>&1; then
-        summary "✅ Fallback validation passed"
-      else
-        summary "❌ Fallback validation failed"
-      fi
-      mv reports/deploy-report-coverage.json reports/deploy-report.json || true
-
-      if [ -f reports/deploy-report.json ]; then
-        ERROR_MSG=$(jq -r '.message // .result.message // "Unknown error"' reports/deploy-report.json 2>/dev/null || echo "Failed to parse error details")
-        if [ -n "$ERROR_MSG" ] && [ "$ERROR_MSG" != "null" ]; then
-          echo "  ↪ ${ERROR_MSG}" | head -c 500
-          echo ""
-        fi
-      fi
-    fi
-  fi
 
   # ----------------------------------------------------------------------------
   # Direct link to the org's Deployment Status page for fast triage.
