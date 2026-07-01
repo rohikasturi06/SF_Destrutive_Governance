@@ -116,6 +116,14 @@ COMPONENT_FAILURES=0
 TEST_FAILURES=0
 COVERAGE=0
 
+# Effective Apex test level actually executed for this run, recorded by
+# validate_deployment.sh. Drives the Coverage row entirely: the value shown is
+# based on the developer's test-run preference (or the auto-resolved level).
+#   NoTestRun / empty  -> no tests ran, so there is no coverage to report
+#   NO_TEST_FOUND       -> Apex changed but no test class could be mapped (error)
+#   <any run level>     -> print the measured coverage value vs the threshold
+EFFECTIVE_TEST_LEVEL="$(tr -d '[:space:]' < reports/test-level.txt 2>/dev/null || true)"
+
 if [ -f reports/deploy-report.json ]; then
   DEPLOY_STATUS=$(jq -r '.result.status // "Unknown"' reports/deploy-report.json 2>/dev/null || echo Unknown)
   if jq -e '.result.details.componentFailures' reports/deploy-report.json >/dev/null 2>&1; then
@@ -134,11 +142,6 @@ LWC_VIOLATIONS=0
 [ -f reports/apex.json ] && APEX_VIOLATIONS=$(jq '.violations | length' reports/apex.json 2>/dev/null || echo 0)
 [ -f reports/lwc.json ]  && LWC_VIOLATIONS=$(jq '.violations | length'  reports/lwc.json  2>/dev/null || echo 0)
 TOTAL_VIOLATIONS=$((APEX_VIOLATIONS + LWC_VIOLATIONS))
-
-HAS_APEX_CHANGES="false"
-if has_source_metadata && find "$DELTA_SOURCE_DIR" \( -name '*.cls' -o -name '*.trigger' \) 2>/dev/null | grep -q .; then
-  HAS_APEX_CHANGES="true"
-fi
 
 # ------------------------------------------------------------------------------
 # Health & Safety derivations
@@ -192,18 +195,28 @@ else
   CQ_NOTE="Apex: ${APEX_VIOLATIONS}, LWC: ${LWC_VIOLATIONS}"
 fi
 
-if [ "$HAS_APEX_CHANGES" = "true" ]; then
-  if [ "${COVERAGE:-0}" -ge "$COVERAGE_THRESHOLD" ]; then
-    COV_STATUS="🟢 ${COVERAGE}%"
-    COV_NOTE="≥ ${COVERAGE_THRESHOLD}% threshold"
-  else
-    COV_STATUS="🔴 ${COVERAGE}%"
-    COV_NOTE="< ${COVERAGE_THRESHOLD}% threshold"
-  fi
-else
-  COV_STATUS="🟢 N/A"
-  COV_NOTE="No custom code (Apex) was modified"
-fi
+# Coverage row is driven entirely by the effective test level (the developer's
+# test-run preference, or the auto-resolved level). We print the coverage VALUE
+# only when tests actually ran.
+case "$EFFECTIVE_TEST_LEVEL" in
+  NO_TEST_FOUND)
+    COV_STATUS="🔴 No Apex test found"
+    COV_NOTE="Apex changed but no test class covers it — add a *Test class"
+    ;;
+  ""|NoTestRun)
+    COV_STATUS="⚪ No test run"
+    COV_NOTE="NoTestRun — no Apex tests were executed for this run"
+    ;;
+  *)
+    if [ "${COVERAGE:-0}" -ge "$COVERAGE_THRESHOLD" ]; then
+      COV_STATUS="🟢 ${COVERAGE}%"
+      COV_NOTE="${EFFECTIVE_TEST_LEVEL} · ≥ ${COVERAGE_THRESHOLD}% threshold"
+    else
+      COV_STATUS="🔴 ${COVERAGE}%"
+      COV_NOTE="${EFFECTIVE_TEST_LEVEL} · < ${COVERAGE_THRESHOLD}% threshold"
+    fi
+    ;;
+esac
 
 # ------------------------------------------------------------------------------
 # Header

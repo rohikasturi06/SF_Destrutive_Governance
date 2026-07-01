@@ -121,28 +121,52 @@ echo "📊 Summary:"
 echo "  • Regular Apex classes: ${ALL_CLASSES:-none}"
 echo "  • Test classes: ${ALL_TESTS:-none}"
 
-# Find which tests cover which classes (simple name matching)
+# ------------------------------------------------------------------------------
+# Map changed classes → the test classes that exercise them.
+#
+# IMPORTANT: we search the ENTIRE repo (force-app), not just this PR's delta.
+# The relevant *Test class is very often already committed and therefore NOT
+# part of the change set, so a delta-only scan finds nothing (which is exactly
+# why earlier runs fell back to hand-typed placeholder classes). A changed class
+# named "Foo" is matched to any @isTest class anywhere that references "Foo" by
+# name (word-boundary match).
+# ------------------------------------------------------------------------------
 MAPPED_TESTS=""
-if [ -n "$ALL_CLASSES" ] && [ -n "$ALL_TESTS" ]; then
+
+# Pre-compute every @isTest class file in the repo once.
+REPO_TEST_FILES=$(grep -rilE '@istest' force-app --include='*.cls' 2>/dev/null || true)
+
+if [ -n "$ALL_CLASSES" ] && [ -n "$REPO_TEST_FILES" ]; then
   echo ""
-  echo "🔗 Mapping tests to classes:"
+  echo "🔗 Mapping changed classes to their test classes (repo-wide):"
   for cls in $ALL_CLASSES; do
-    for test in $ALL_TESTS; do
-      # Check if test references the class by name
-      test_file=$(find delta/force-app force-app -path "*/classes/${test}.cls" 2>/dev/null | head -n1)
-      if [ -n "$test_file" ] && grep -qE "\b${cls}\b" "$test_file" 2>/dev/null; then
-        echo "  ✓ ${test} tests ${cls}"
-        MAPPED_TESTS="$MAPPED_TESTS $test"
+    while IFS= read -r test_file; do
+      [ -z "$test_file" ] && continue
+      if grep -qE "\b${cls}\b" "$test_file" 2>/dev/null; then
+        test_name=$(basename "$test_file" .cls)
+        echo "  ✓ ${test_name} tests ${cls}"
+        MAPPED_TESTS="$MAPPED_TESTS $test_name"
       fi
-    done
+    done <<EOF
+$REPO_TEST_FILES
+EOF
   done
-  MAPPED_TESTS=$(echo "$MAPPED_TESTS" | xargs -n1 2>/dev/null | sort -u | xargs || echo "")
 fi
 
-# If no mapped tests found, use all test classes
-if [ -z "$MAPPED_TESTS" ] && [ -n "$ALL_TESTS" ]; then
-  MAPPED_TESTS="$ALL_TESTS"
-  echo "  ℹ️  No specific mappings found, will use all test classes"
+# Always include test classes that are part of this PR's delta (a changed test
+# class should obviously run), on top of the repo-wide matches above.
+if [ -n "$ALL_TESTS" ]; then
+  MAPPED_TESTS="$MAPPED_TESTS $ALL_TESTS"
+fi
+
+MAPPED_TESTS=$(echo "$MAPPED_TESTS" | xargs -n1 2>/dev/null | sort -u | xargs || echo "")
+
+# Deliberately NO "run every test class" fallback here: if we cannot tie the
+# change to specific tests we leave RELATED_TESTS empty, and the downstream
+# resolver/deploy builder falls back to RunLocalTests (safer and clearer than
+# guessing an unrelated subset).
+if [ -z "$MAPPED_TESTS" ]; then
+  echo "  ℹ️  No specific test classes could be mapped to the changed classes."
 fi
 
 echo ""
