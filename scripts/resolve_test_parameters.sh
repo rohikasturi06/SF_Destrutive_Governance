@@ -91,12 +91,17 @@ extract_specified_tests() {
 RESOLVED_LEVEL="RunLocalTests"
 RESOLVED_TESTS=""
 RESOLVED_ENV="sandbox-dev"
+# How the level was chosen: dispatch | label | checkbox | default. Consumers use
+# this to decide whether to OVERRIDE a pipeline's own default test strategy
+# (they should only override when a level was explicitly selected).
+SELECTION_SOURCE="default"
 
 if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
   info "🎛  Resolving parameters from manual workflow_dispatch inputs"
   RESOLVED_LEVEL="${INPUT_TEST_LEVEL:-RunLocalTests}"
   RESOLVED_TESTS="${INPUT_SPECIFIED_TESTS:-}"
   RESOLVED_ENV="${INPUT_TARGET_ENV:-sandbox-dev}"
+  SELECTION_SOURCE="dispatch"
 else
   info "🔎 Resolving parameters from pull_request event"
 
@@ -120,17 +125,18 @@ else
   if [ -n "$LABEL_MATCH" ]; then
     info "🏷  Matched level via label: $LABEL_MATCH"
     RESOLVED_LEVEL="$LABEL_MATCH"
+    SELECTION_SOURCE="label"
   else
     # 1b. Markdown checkbox parsing (fixed-string match; brackets are literal).
     info "🧾 No label match — evaluating PR body checkboxes"
     if   printf '%s' "$PR_BODY" | grep -qF -- '- [x] `- [ ] NoTestRun`'; then
-      RESOLVED_LEVEL="NoTestRun"
+      RESOLVED_LEVEL="NoTestRun"; SELECTION_SOURCE="checkbox"
     elif printf '%s' "$PR_BODY" | grep -qF -- '- [x] `- [ ] RunSpecifiedTests`'; then
-      RESOLVED_LEVEL="RunSpecifiedTests"
+      RESOLVED_LEVEL="RunSpecifiedTests"; SELECTION_SOURCE="checkbox"
     elif printf '%s' "$PR_BODY" | grep -qF -- '- [x] `- [ ] RunAllTestsInOrg`'; then
-      RESOLVED_LEVEL="RunAllTestsInOrg"
+      RESOLVED_LEVEL="RunAllTestsInOrg"; SELECTION_SOURCE="checkbox"
     elif printf '%s' "$PR_BODY" | grep -qF -- '- [x] `- [ ] RunLocalTests`'; then
-      RESOLVED_LEVEL="RunLocalTests"
+      RESOLVED_LEVEL="RunLocalTests"; SELECTION_SOURCE="checkbox"
     else
       info "ℹ️  No checkbox checked — defaulting to RunLocalTests"
     fi
@@ -213,7 +219,8 @@ info "⚙️  execution_mode = $EXEC_MODE"
 # ------------------------------------------------------------------------------
 # Step 3: Emit resolved, validated outputs
 # ------------------------------------------------------------------------------
-emit "TEST_LEVEL"      "$RESOLVED_LEVEL"
-emit "SPECIFIED_TESTS" "$RESOLVED_TESTS"
-emit "TARGET_ENV"      "$RESOLVED_ENV"
-emit "EXECUTION_MODE"  "$EXEC_MODE"
+emit "TEST_LEVEL"       "$RESOLVED_LEVEL"
+emit "SPECIFIED_TESTS"  "$RESOLVED_TESTS"
+emit "TARGET_ENV"       "$RESOLVED_ENV"
+emit "EXECUTION_MODE"   "$EXEC_MODE"
+emit "SELECTION_SOURCE" "$SELECTION_SOURCE"

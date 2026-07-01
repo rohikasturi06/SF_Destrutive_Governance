@@ -183,14 +183,40 @@ PY
 # ------------------------------------------------------------------------------
 # select_test_args <out-array-name>
 # Echoes test selection flags for `sf project deploy start`.
-# Inputs (env): RELATED_TESTS, DELTA_SOURCE_DIR
+# Inputs (env): FORCE_TEST_LEVEL, FORCE_SPECIFIED_TESTS, RELATED_TESTS,
+#               DELTA_SOURCE_DIR
 # Behavior:
-#   - If RELATED_TESTS is set, use RunSpecifiedTests with that CSV
+#   - If FORCE_TEST_LEVEL is set (developer explicitly picked a level via PR
+#     label / checkbox / dispatch), honor it verbatim. This is the override that
+#     replaces the standalone Quality Gate Orchestrator. It is UNSET on
+#     post-merge deploys, so their behavior is unchanged.
+#   - Else if RELATED_TESTS is set, use RunSpecifiedTests with that CSV
 #   - Else if delta has Apex (.cls/.trigger), use RunLocalTests
 #   - Else NoTestRun (metadata-only, including destructive-only)
 # ------------------------------------------------------------------------------
 select_test_args() {
   local _csv
+
+  # Explicit developer override (PR label / checkbox / manual dispatch).
+  if [ -n "${FORCE_TEST_LEVEL:-}" ]; then
+    case "$FORCE_TEST_LEVEL" in
+      RunSpecifiedTests)
+        _csv=$(echo "${FORCE_SPECIFIED_TESTS:-${RELATED_TESTS:-}}" | xargs -n1 | paste -sd, - || echo "")
+        if [ -n "$_csv" ]; then
+          printf '%s\n' "--test-level" "RunSpecifiedTests" "--tests" "$_csv"
+        else
+          # No classes supplied — fall back safely to RunLocalTests.
+          printf '%s\n' "--test-level" "RunLocalTests"
+        fi
+        return 0
+        ;;
+      NoTestRun|RunLocalTests|RunAllTestsInOrg)
+        printf '%s\n' "--test-level" "$FORCE_TEST_LEVEL"
+        return 0
+        ;;
+    esac
+  fi
+
   if [ -n "${RELATED_TESTS:-}" ]; then
     _csv=$(echo "$RELATED_TESTS" | xargs -n1 | paste -sd, - || echo "")
   fi

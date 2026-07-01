@@ -365,6 +365,38 @@ jobs:
         if: env.HAS_ORG_AUTH == 'true'
         run: ./scripts/map_tests.sh
 
+      # Honor a developer-selected Apex test level from the PR (a test-level:<X>
+      # label or the pull_request_template checkbox). When nothing is explicitly
+      # selected, the pipeline keeps its default delta-mapped test strategy.
+      # This folds the former standalone "Quality Gate Orchestrator" in here so
+      # there is exactly ONE pipeline run per PR.
+      - name: Resolve Requested Apex Test Level
+        if: env.HAS_ORG_AUTH == 'true'
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          TARGET_BRANCH: ${{ github.event.pull_request.base.ref || github.base_ref }}
+        run: |
+          chmod +x ./scripts/resolve_test_parameters.sh
+          set +e
+          RESOLVED="$(./scripts/resolve_test_parameters.sh 2>/tmp/resolve.err)"
+          RC=$?
+          set -e
+          cat /tmp/resolve.err >&2 || true
+          if [ "$RC" -ne 0 ]; then
+            echo "::error::Requested Apex test level failed policy/guardrail checks (see messages above)."
+            exit 1
+          fi
+          SRC="$(printf '%s\n' "$RESOLVED" | awk -F= '/^SELECTION_SOURCE=/{print $2}')"
+          LVL="$(printf '%s\n' "$RESOLVED" | awk -F= '/^TEST_LEVEL=/{print $2}')"
+          TESTS="$(printf '%s\n' "$RESOLVED" | awk -F= '/^SPECIFIED_TESTS=/{print $2}')"
+          if [ -n "$SRC" ] && [ "$SRC" != "default" ]; then
+            echo "🎯 Explicit Apex test level '$LVL' selected via ${SRC}; overriding default test strategy."
+            echo "FORCE_TEST_LEVEL=$LVL" >> "$GITHUB_ENV"
+            echo "FORCE_SPECIFIED_TESTS=$TESTS" >> "$GITHUB_ENV"
+          else
+            echo "ℹ️ No explicit test-level label/checkbox; using the default delta-mapped test strategy."
+          fi
+
       # STAGE 5.5: PRE-FLIGHT ORPHANED DEPENDENCY SCAN
       # Block deletions that still have live references in the repo before
       # Salesforce dry-run. Errors land in reports/dependency-errors.md and
