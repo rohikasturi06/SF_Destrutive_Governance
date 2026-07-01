@@ -27,3 +27,5 @@ private class DependencyTestCoreTests {
         System.assertEquals('hello', (String)results[0].get('Test_Text__c'));
     }
 }
+
+
