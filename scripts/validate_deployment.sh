@@ -163,10 +163,14 @@ if has_any_deployable; then
   fi
 
   echo ""
-  echo "⚙️  EXECUTING DRY-RUN VALIDATION"
+  echo "⚙️  EXECUTING VALIDATION"
   echo "================================"
   echo "📋 Validation Details:"
-  echo "  • Mode: Dry-run (check-only - no actual deployment)"
+  if [ "$PRIMARY_TEST_LEVEL" = "NoTestRun" ]; then
+    echo "  • Command: sf project deploy start --dry-run (no tests)"
+  else
+    echo "  • Command: sf project deploy validate (runs tests, quick-deploy ID)"
+  fi
   echo "  • Test Level: ${PRIMARY_TEST_LEVEL}"
   echo "  • Environment: ${ORG_NAME:-sandbox}"
   if [ "${HAS_DESTRUCTIVE_CHANGES:-false}" = "true" ]; then
@@ -175,15 +179,37 @@ if has_any_deployable; then
   echo ""
 
   summary "🔄 Running validation..."
+  # --------------------------------------------------------------------------
+  # COMMAND MAPPING (critical — a plain `deploy start --dry-run` performs a
+  # STRUCTURAL check only and does NOT execute the Apex tests: the org shows
+  # "Run Apex Tests: Not Run" and coverage 0% even for RunSpecifiedTests).
+  #   NoTestRun  -> sf project deploy start --dry-run   (validate rejects NoTestRun)
+  #   all others -> sf project deploy validate          (ACTUALLY runs the tests
+  #                 and yields a 10-day quick-deploy validation ID)
+  # We strip --dry-run (added by build_deploy_args) and pick the verb per level.
+  # --------------------------------------------------------------------------
+  declare -a RUN_ARGS=()
+  for _a in "${PRIMARY_ARGS[@]}"; do
+    [ "$_a" = "--dry-run" ] && continue
+    RUN_ARGS+=("$_a")
+  done
+
   # IMPORTANT: keep stdout (the --json payload) PURE. Do NOT use `2>&1` here — the
   # sf/Node CLI writes warnings to stderr (e.g. "(node:...) DeprecationWarning:
   # punycode"), which would be prepended to the JSON and make every downstream
-  # `jq` read fail -> coverage misreported as 0% and status as "Failed". Send
-  # stderr to a separate log instead.
-  if sf project deploy start "${PRIMARY_ARGS[@]}" > reports/deploy-report.json 2>reports/deploy-report.stderr.log; then
-    summary "✅ Validation passed (${PRIMARY_TEST_LEVEL})"
+  # `jq` read fail. Send stderr to a separate log instead.
+  if [ "$PRIMARY_TEST_LEVEL" = "NoTestRun" ]; then
+    if sf project deploy start "${RUN_ARGS[@]}" --dry-run > reports/deploy-report.json 2>reports/deploy-report.stderr.log; then
+      summary "✅ Validation passed (NoTestRun / dry-run)"
+    else
+      summary "⚠️  Validation reported errors (NoTestRun / dry-run)"
+    fi
   else
-    summary "⚠️  Validation failed with primary strategy"
+    if sf project deploy validate "${RUN_ARGS[@]}" > reports/deploy-report.json 2>reports/deploy-report.stderr.log; then
+      summary "✅ Validation passed (${PRIMARY_TEST_LEVEL})"
+    else
+      summary "⚠️  Validation reported errors (${PRIMARY_TEST_LEVEL})"
+    fi
   fi
   # Surface any real CLI stderr for debugging without polluting the JSON report.
   if [ -s reports/deploy-report.stderr.log ]; then
