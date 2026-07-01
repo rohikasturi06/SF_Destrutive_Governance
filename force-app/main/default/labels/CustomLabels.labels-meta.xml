@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomLabels xmlns="http://soap.sforce.com/2006/04/metadata">
+    <labels>
+        <fullName>Error_Invalid_Status</fullName>
+        <language>en_US</language>
+        <protected>true</protected>
+        <shortDescription>Error Invalid Status</shortDescription>
+        <value>The status you entered is invalid.</value>
+    </labels>
+</CustomLabels>

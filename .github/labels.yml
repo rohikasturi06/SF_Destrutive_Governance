@@ -1,0 +1,27 @@
+# ==============================================================================
+# Standardized GitHub Labels — Salesforce Quality Gate Test Levels
+# ==============================================================================
+# These four labels drive the highest-precedence test-level selection in the
+# "Salesforce Quality Gate Orchestrator" pipeline. Applying one of them to a PR
+# overrides the markdown-checkbox selection.
+#
+# Sync them into the repository with the "Sync Repository Labels" workflow
+# (.github/workflows/manage-labels.yml) or manually via:
+#   gh label create "test-level:NoTestRun" --color BFD4F2 --description "..."
+# ==============================================================================
+
+- name: "test-level:NoTestRun"
+  color: "BFD4F2"
+  description: "Validate with NoTestRun (dry-run). Sandboxes / scratch orgs only."
+
+- name: "test-level:RunSpecifiedTests"
+  color: "FBCA04"
+  description: "Run only the Apex classes declared in the PR body / dispatch form."
+
+- name: "test-level:RunLocalTests"
+  color: "0E8A16"
+  description: "Standard regression: all local (unmanaged) Apex tests in the org."
+
+- name: "test-level:RunAllTestsInOrg"
+  color: "B60205"
+  description: "Full system validation: every test in the org (incl. managed)."

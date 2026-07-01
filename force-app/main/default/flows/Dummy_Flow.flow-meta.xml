@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Flow xmlns="http://soap.sforce.com/2006/04/metadata">
+    <apiVersion>64.0</apiVersion>
+    <description> pipelines and CIs.</description>
+    <label>Dummie Autolaunched Flows</label>
+    <processType>AutoLaunchedFlow</processType>
+    <status>Active</status>
+
+    <variables>
+        <name>varText</name>
+        <dataType>String</dataType>
+        <isCollection>false</isCollection>
+        <isInput>true</isInput>
+        <isOutput>false</isOutput>
+    </variables>
+
+    <assignments>
+        <name>Sets_Dummy</name>
+        <label>Set Dummy</label>
+        <locationX>100</locationX>
+        <locationY>100</locationY>
+        <assignmentItems>
+            <assignToReference>varText</assignToReference>
+            <operator>Assign</operator>
+            <value>
+                <stringValue>ok</stringValue>
+            </value>
+        </assignmentItems>
+    </assignments>
+
+    <startElementReference>Sets_Dummy</startElementReference>
+</Flow>

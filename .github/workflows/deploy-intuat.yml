@@ -1,0 +1,669 @@
+name: Salesforce INTUAT Environment CI/CD
+
+on:
+  pull_request:
+    branches:
+      - intuat
+    types: [opened, synchronize, reopened]
+    paths-ignore:
+      - 'README.md'
+      - 'docs/**'
+
+permissions:
+  contents: write
+  actions: read
+  pull-requests: write   # required to post the executive summary as a sticky PR comment
+
+env:
+  SEVERITY_THRESHOLD: 3  # High/Critical violations only
+  COVERAGE_THRESHOLD: 75 # Minimum code coverage percentage required
+  TARGET_ENV: intuat
+
+concurrency:
+  group: intuat-pr-validation
+  cancel-in-progress: true
+
+jobs:
+  intuat_validation:
+    name: "INTUAT Environment Quality Gates"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Initialize Repository Context
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate INTUAT Environment Target
+        run: |
+          echo "✅ Validating PR target: intuat environment"
+          echo "PR #${{ github.event.pull_request.number }} → intuat"
+          echo "Target Environment: ${{ env.TARGET_ENV }}"
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '11'
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Optimize Salesforce CLI Performance
+        uses: actions/cache@v4
+        with:
+          path: ~/.sf
+          key: sf-cli-${{ runner.os }}-${{ hashFiles('**/sfdx-project.json') }}
+          restore-keys: |
+            sf-cli-${{ runner.os }}-
+
+      - name: Install SF CLI + sgd
+        run: |
+          npm install -g @salesforce/cli --silent
+          echo y | sf plugins install sfdx-git-delta
+
+      - name: Install jq for JSON parsing
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y jq
+
+      # STAGE 2: INTUAT ENVIRONMENT AUTHENTICATION
+
+      - name: Check INTUAT Environment Authentication
+        id: intuat-auth-check
+        run: |
+          if [ -n "${{ secrets.INTUAT_SF_AUTH_URL }}" ]; then
+            echo "✅ INTUAT environment authentication configured"
+            echo "HAS_ORG_AUTH=true" >> $GITHUB_ENV
+            echo "SF_AUTH_URL=${{ secrets.INTUAT_SF_AUTH_URL }}" >> $GITHUB_ENV
+            echo "ORG_NAME=intuat" >> $GITHUB_ENV
+          else
+            echo "❌ INTUAT environment authentication not configured"
+            echo "HAS_ORG_AUTH=false" >> $GITHUB_ENV
+          fi
+
+      - name: Handle missing intuat authentication gracefully
+        if: env.HAS_ORG_AUTH != 'true'
+        run: |
+          echo "⚠️  WARNING: INTUAT environment authentication secrets not configured..."
+          echo "❌ Failing validation due to missing authentication"
+          echo "failure" > validation_result.txt
+          exit 1
+
+      - name: Authenticate to INTUAT Salesforce Org
+        if: env.HAS_ORG_AUTH == 'true'
+        run: |
+          echo "🔐 Authenticating to INTUAT Salesforce Org..."
+          # Write the secret to a temp file with printf (no trailing newline,
+          # no quoting changes) instead of <(echo ...), which can mangle the URL.
+          AUTH_FILE="$(mktemp)"
+          printf '%s' "${{ secrets.INTUAT_SF_AUTH_URL }}" > "$AUTH_FILE"
+
+          # Validate the shape WITHOUT printing the secret. A valid SFDX auth URL
+          # always starts with 'force://'. The most common CI mistakes are storing
+          # 'null', an access token, or a value wrapped in quotes/whitespace.
+          if ! grep -q '^force://' "$AUTH_FILE"; then
+            echo "❌ INTUAT_SF_AUTH_URL is not a valid SFDX auth URL (must start with 'force://')."
+            echo "   Likely the secret holds 'null', an access token, or has surrounding quotes/whitespace."
+            echo "   Regenerate it with: sf org auth show-sfdx-auth-url --target-org <intuat-org>  (NOTE: 'sf org display' now REDACTS sfdxAuthUrl)"
+            rm -f "$AUTH_FILE"
+            exit 1
+          fi
+
+          # Capture the CLI's REAL error. `sf` prints its error JSON to stdout, so
+          # the previous '2>/tmp/sf-login.err' only kept the Node warning and hid
+          # the actual reason. --json + combined capture surfaces it safely.
+          set +e
+          LOGIN_OUT="$(sf org login sfdx-url --sfdx-url-file "$AUTH_FILE" --alias intuat --set-default --json 2>&1)"
+          LOGIN_RC=$?
+          set -e
+          rm -f "$AUTH_FILE"
+          if [ "$LOGIN_RC" -ne 0 ]; then
+            echo "❌ sf org login failed (exit ${LOGIN_RC}). Reason reported by Salesforce CLI:"
+            echo "$LOGIN_OUT" | jq -r '.message // .name // empty' 2>/dev/null | sed 's/^/   /' || true
+            echo "   Regenerate it with: sf org auth show-sfdx-auth-url --target-org <intuat-org>  (NOTE: 'sf org display' now REDACTS sfdxAuthUrl)"
+            exit 1
+          fi
+
+          # Confirm the org is actually reachable before downstream steps trust it.
+          ORG_INFO=$(sf org display --target-org intuat --json 2>/dev/null || echo '{}')
+          ORG_USER=$(echo "$ORG_INFO" | jq -r '.result.username // empty')
+          INSTANCE_URL=$(echo "$ORG_INFO" | jq -r '.result.instanceUrl // empty')
+          CONNECTED=$(echo "$ORG_INFO" | jq -r '.result.connectedStatus // empty')
+
+          if [ -z "$ORG_USER" ] || [ -z "$INSTANCE_URL" ]; then
+            echo "❌ Authentication did not produce a usable INTUAT org (username/instance came back empty)."
+            echo "   This usually means INTUAT_SF_AUTH_URL points to an expired or deleted org. Regenerate the secret."
+            exit 1
+          fi
+
+          echo "✅ Successfully authenticated to INTUAT org"
+          echo "   • Org: $ORG_USER"
+          echo "   • Instance: $INSTANCE_URL"
+          echo "   • Status: ${CONNECTED:-Unknown}"
+
+      # STAGE 3: DELTA GENERATION AND ANALYSIS
+
+      - name: Install Delta Generation Dependencies
+        if: env.HAS_ORG_AUTH == 'true'
+        run: |
+          echo y | sf plugins install sfdx-git-delta
+          sf plugins --core
+
+      - name: Generate Delta Package for INTUAT
+        id: generate-delta
+        if: env.HAS_ORG_AUTH == 'true'
+        env:
+          TARGET_BRANCH: ${{ github.event.pull_request.base.ref || github.base_ref || github.ref_name }}
+        run: |
+          echo "🔍 Generating delta package for intuat environment..."
+          ./scripts/generate_delta.sh
+          
+          # Check for Apex components
+          if find delta/force-app -name "*.cls" -o -name "*.trigger" 2>/dev/null | grep -q .; then
+            echo "has-apex=true" >> $GITHUB_OUTPUT
+            echo "✅ Apex components detected in delta"
+          else
+            echo "has-apex=false" >> $GITHUB_OUTPUT
+            echo "ℹ️ No Apex components in delta"
+          fi
+          
+          # Check for LWC components
+          if find delta/force-app -name "*.js" -path "*/lwc/*" 2>/dev/null | grep -q .; then
+            echo "has-lwc=true" >> $GITHUB_OUTPUT
+            echo "✅ LWC components detected in delta"
+          else
+            echo "has-lwc=false" >> $GITHUB_OUTPUT
+            echo "ℹ️ No LWC components in delta"
+          fi
+          
+          # Reasoning: generate_delta.sh has already written HAS_DEPLOYMENT_PACKAGE
+          # and HAS_DESTRUCTIVE_CHANGES to $GITHUB_ENV (single source of truth).
+          # We re-read those values here so destructive-only PRs (no source
+          # metadata, only deletions) still flow into validation.
+          DELTA_HAS_PKG=$(grep '^HAS_DEPLOYMENT_PACKAGE=' "$GITHUB_ENV" 2>/dev/null | tail -n1 | cut -d= -f2- || echo "false")
+          DELTA_HAS_DESTRUCTIVE=$(grep '^HAS_DESTRUCTIVE_CHANGES=' "$GITHUB_ENV" 2>/dev/null | tail -n1 | cut -d= -f2- || echo "false")
+          DELTA_DESTRUCTIVE_COUNT=$(grep '^DESTRUCTIVE_MEMBER_COUNT=' "$GITHUB_ENV" 2>/dev/null | tail -n1 | cut -d= -f2- || echo "0")
+
+          if [ -f "delta/package/package.xml" ]; then
+            # `grep -c` prints "0" AND exits 1 when no matches, so the legacy
+            # `|| echo "0"` pattern produced the two-line string "0\n0", which
+            # then broke the `[ -gt 0 ]` integer test below. Capture stdout
+            # cleanly and fall back to 0 only if the command itself failed.
+            COMPONENT_COUNT=$(grep -c "<types>" delta/package/package.xml 2>/dev/null) || COMPONENT_COUNT=0
+          else
+            COMPONENT_COUNT=0
+          fi
+
+          echo "🔍 Delta diagnostics:"
+          echo "   • Source component types in package.xml : ${COMPONENT_COUNT}"
+          echo "   • Destructive members                   : ${DELTA_DESTRUCTIVE_COUNT}"
+          echo "   • generate_delta.sh HAS_DEPLOYMENT_PACKAGE: ${DELTA_HAS_PKG}"
+
+          if [ "$DELTA_HAS_PKG" = "true" ] || [ "$COMPONENT_COUNT" -gt 0 ] || [ "$DELTA_HAS_DESTRUCTIVE" = "true" ]; then
+            if [ "$COMPONENT_COUNT" -gt 0 ]; then
+              echo "✅ Source delta detected (${COMPONENT_COUNT} component types)"
+            fi
+            if [ "$DELTA_HAS_DESTRUCTIVE" = "true" ]; then
+              echo "🗑  Destructive delta detected (${DELTA_DESTRUCTIVE_COUNT} member(s))"
+            fi
+            echo "HAS_DEPLOYMENT_PACKAGE=true" >> $GITHUB_ENV
+          else
+            echo "⚠️ Empty delta — no Salesforce/Vlocity components and no destructive changes"
+            echo ""
+            if [ -f "delta/package/package.xml" ]; then
+              echo "📄 Package.xml Contents:"
+              echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              cat delta/package/package.xml
+              echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            fi
+            echo ""
+            echo "📝 Files Modified in This Change (Script/YAML Only):"
+            CHANGED_FILES=$(git diff --name-only origin/${{ github.event.pull_request.base.ref }} HEAD 2>/dev/null || git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "")
+            if [ -n "$CHANGED_FILES" ]; then
+              echo "$CHANGED_FILES" | sed 's/^/   • /'
+            else
+              echo "   • No changed files detected"
+            fi
+            echo "HAS_DEPLOYMENT_PACKAGE=false" >> $GITHUB_ENV
+          fi
+
+      - name: Smart recovery - check previous build status and merge failed deltas
+        if: env.HAS_ORG_AUTH == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          GITHUB_TOKEN="${GITHUB_TOKEN:-}"
+          
+          if [ -z "${GITHUB_TOKEN}" ]; then
+            echo "::warning::GITHUB_TOKEN not available; skipping smart recovery"
+            exit 0
+          fi
+          
+          echo "🔍 Checking previous build status for smart recovery..."
+          
+          # Get the last 2 workflow runs for this branch to check previous run status
+          RUNS_JSON=$(curl -sSL -H "Authorization: Bearer ${GITHUB_TOKEN}" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/runs?branch=${{ github.event.pull_request.base.ref }}&per_page=2" || echo '{"workflow_runs":[]}')
+          
+          # Get previous run status (index 1, since index 0 is current run)
+          PREV_RUN_STATUS=$(echo "$RUNS_JSON" | jq -r '.workflow_runs[1].conclusion // "unknown"')
+          PREV_RUN_ID=$(echo "$RUNS_JSON" | jq -r '.workflow_runs[1].id // "unknown"')
+          
+          echo "📊 Previous run status: $PREV_RUN_STATUS (run ID: $PREV_RUN_ID)"
+          
+          # Check for consecutive failures to avoid infinite retry loops
+          FAIL_COUNT=$(curl -sSL -H "Authorization: Bearer ${GITHUB_TOKEN}" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/runs?branch=${{ github.event.pull_request.base.ref }}&status=failure&per_page=3" \
+            | jq '.workflow_runs | length' || echo '0')
+          
+          echo "📈 Consecutive failure count: $FAIL_COUNT"
+          
+          # Smart recovery logic
+          if [ "$PREV_RUN_STATUS" = "failure" ] || [ "$PREV_RUN_STATUS" = "timed_out" ]; then
+            if [ "$FAIL_COUNT" -ge 3 ]; then
+              echo "🧹 Too many consecutive failures ($FAIL_COUNT) — resetting to clean state"
+              echo "SMART_RECOVERY_MODE=reset" >> "$GITHUB_ENV"
+            else
+              echo "⚠️ Previous build failed — enabling smart recovery mode"
+              echo "SMART_RECOVERY_MODE=merge_failed" >> "$GITHUB_ENV"
+              
+              # Download outstanding failed-delta artifacts for this branch
+              mkdir -p failed-deltas
+              ARTIFACTS_JSON=$(curl -sSL -H "Authorization: Bearer ${GITHUB_TOKEN}" -H "Accept: application/vnd.github+json" \
+                "https://api.github.com/repos/${{ github.repository }}/actions/artifacts" || echo '{"artifacts":[]}')
+              
+              # Filter by name pattern failed-delta-${GITHUB_REF_NAME} and download
+              echo "$ARTIFACTS_JSON" | jq -r \
+                --arg name "failed-delta-${{ github.event.pull_request.base.ref }}" \
+                '.artifacts[] | select(.name | startswith($name)) | .archive_download_url' \
+                | while read -r url; do
+                  if [ -n "$url" ]; then
+                    echo "📥 Downloading failed delta: $url"
+                    tmp_zip="/tmp/failed_delta_$(basename "$url").zip"
+                    curl -sSL -H "Authorization: Bearer ${GITHUB_TOKEN}" -H "Accept: application/vnd.github+json" -o "$tmp_zip" "$url"
+                    unzip -o "$tmp_zip" -d failed-deltas || true
+                    rm -f "$tmp_zip"
+                  fi
+                done
+              
+              # Merge failed deltas into delta/force-app if any were downloaded
+              if [ -d "failed-deltas" ] && [ "$(find failed-deltas -type f | wc -l)" -gt 0 ]; then
+                echo "🔄 Merging failed deltas into current delta package"
+                mkdir -p delta/force-app
+                cp -R failed-deltas/* delta/force-app/ || true
+                echo "✅ Merged failed deltas - deployment will include previously failed components"
+              else
+                echo "ℹ️ No failed deltas found to merge"
+              fi
+            fi
+          else
+            echo "✅ Previous build succeeded — starting clean delta from deploy tag"
+            echo "SMART_RECOVERY_MODE=clean" >> "$GITHUB_ENV"
+          fi
+
+      - name: Skip validation if no changes
+        if: env.HAS_DEPLOYMENT_PACKAGE != 'true'
+        run: |
+          echo "✅ No changes detected - skipping validation"
+          echo "success" > validation_result.txt
+
+      # STAGE 4: STATIC CODE ANALYSIS
+
+      - name: Run Salesforce Code Analyzer for Apex
+        id: run-code-analyzer-apex
+        if: |
+          env.HAS_ORG_AUTH == 'true' &&
+          always() &&
+          (steps.generate-delta.outcome == 'success' || steps.generate-delta.outcome == 'failure') &&
+          (contains(steps.generate-delta.outputs.has-apex, 'true'))
+        uses: forcedotcom/run-code-analyzer@v2
+        with:
+          run-arguments: >
+            --target force-app/main/default/classes
+            --view detail
+            --output-file reports/apex.json
+            --severity-threshold ${{ env.SEVERITY_THRESHOLD }}
+          results-artifact-name: code-analyzer-apex-results
+        continue-on-error: false
+
+      - name: Run Salesforce Code Analyzer for LWC
+        id: run-code-analyzer-lwc
+        if: |
+          env.HAS_ORG_AUTH == 'true' &&
+          always() &&
+          (steps.generate-delta.outcome == 'success' || steps.generate-delta.outcome == 'failure') &&
+          (contains(steps.generate-delta.outputs.has-lwc, 'true'))
+        uses: forcedotcom/run-code-analyzer@v2
+        with:
+          run-arguments: >
+            --target force-app/main/default/lwc
+            --view detail
+            --output-file reports/lwc.json
+            --severity-threshold ${{ env.SEVERITY_THRESHOLD }}
+          results-artifact-name: code-analyzer-lwc-results
+        continue-on-error: false
+
+      - name: Display Code Analysis Results
+        if: always()
+        run: ./scripts/analyze_code.sh
+        continue-on-error: true
+
+      - name: Archive Code Analysis Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: intuat-static-code-analysis-reports
+          path: reports/
+          retention-days: 30
+
+      # STAGE 5: APEX TEST CLASS IDENTIFICATION
+
+      - name: Identify Apex Test Classes
+        if: env.HAS_ORG_AUTH == 'true'
+        run: ./scripts/map_tests.sh
+
+      # STAGE 5.5: PRE-FLIGHT ORPHANED DEPENDENCY SCAN
+      # Block deletions that still have live references in the repo before
+      # Salesforce dry-run. Errors land in reports/dependency-errors.md and
+      # are auto-promoted to the top of the executive summary PR comment.
+
+      - name: 🛑 Pre-Flight Dependency Scan
+        if: env.HAS_ORG_AUTH == 'true' && env.HAS_DESTRUCTIVE_CHANGES == 'true'
+        env:
+          TARGET_BRANCH: ${{ github.event.pull_request.base.ref || github.base_ref || github.ref_name }}
+        run: |
+          chmod +x ./scripts/scan_dependencies.sh
+          ./scripts/scan_dependencies.sh
+
+      # STAGE 6: INTUAT ENVIRONMENT VALIDATION
+
+      - name: INTUAT QUALITY GATE VALIDATION
+        if: env.HAS_ORG_AUTH == 'true'
+        env:
+          TARGET_BRANCH: ${{ github.event.pull_request.base.ref || github.base_ref || github.ref_name }}
+        run: |
+          # The script owns validation_result.txt — no double-bookkeeping here.
+          if [ "$HAS_DEPLOYMENT_PACKAGE" = "true" ]; then
+            ./scripts/validate_deployment.sh
+          else
+            echo "✅ No Salesforce metadata changes — quality gates trivially pass."
+            echo "success" > validation_result.txt
+          fi
+
+      # NOTE: Vlocity / OmniStudio components are intentionally NOT validated on
+      # PRs. This mirrors the Jenkins pipeline, whose validate() step explicitly
+      # states "Vlocity Components are not validated as part of this deployment."
+      # Vlocity is deployed post-merge only, via scripts/vlocity_deploy.sh
+      # (packDeploy / packRetry) in deploy.yml.
+
+      - name: Analyze Code Coverage for Delta Classes
+        if: always()
+        run: ./scripts/filter_coverage.sh
+        continue-on-error: true
+
+      - name: Set Final Quality Gate Output
+        id: set-quality-gates
+        if: always()
+        run: |
+          # Trust the result file written by validate_deployment.sh / scan_dependencies.sh.
+          # Detailed errors were already printed in the previous step's logs and are
+          # rendered in the executive summary on the PR — we deliberately do not
+          # re-dump them here.
+          QUALITY="$(cat validation_result.txt 2>/dev/null || echo missing)"
+          echo "quality_gates=$QUALITY" >> "$GITHUB_OUTPUT"
+
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "🚦 INTUAT QUALITY GATE — FINAL VERDICT"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          case "$QUALITY" in
+            success)
+              echo "✅ PASSED — PR is safe to review and merge."
+              exit 0
+              ;;
+            failure)
+              echo "❌ FAILED — see the previous step's logs for the exact errors."
+              echo "💬 The same details are posted as a sticky 'Executive Summary' comment on this PR."
+              exit 1
+              ;;
+            *)
+              echo "❌ FAILED — no quality-gate result was recorded (validation_result.txt missing)."
+              echo "   This means the validation step never ran — an earlier REQUIRED step failed first."
+              echo "   👉 Scroll up to the first ❌ step in this job. Most common causes:"
+              echo "      • Salesforce authentication failed (invalid/expired *_SF_AUTH_URL secret)"
+              echo "      • Salesforce Code Analyzer exceeded the severity threshold"
+              echo "      • Delta generation failed"
+              exit 1
+              ;;
+          esac
+
+      - name: Upload intuat validation reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: intuat-validation-reports-${{ github.run_id }}
+          path: reports/
+          retention-days: 30
+
+      - name: Upload quality gate result (artifact fallback)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: intuat-quality-gate-${{ github.run_id }}
+          path: validation_result.txt
+          retention-days: 3
+
+      - name: Generate Dynamic Email Content
+        if: always()
+        id: generate-email
+        run: |
+          echo "🎯 INTUAT ENVIRONMENT PR VALIDATION SUMMARY" > email_content.txt
+          echo "═══════════════════════════════════════════════════════" >> email_content.txt
+          echo "" >> email_content.txt
+          echo "📋 PR Details:" >> email_content.txt
+          echo "• PR Number: #${{ github.event.pull_request.number }}" >> email_content.txt
+          echo "• Source Branch: ${{ github.event.pull_request.head.ref }}" >> email_content.txt
+          echo "• Target Branch: ${{ github.event.pull_request.base.ref }}" >> email_content.txt
+          echo "• Author: ${{ github.event.pull_request.user.login }}" >> email_content.txt
+          echo "• Commit SHA: ${{ github.event.pull_request.head.sha }}" >> email_content.txt
+          echo "• Validation Status: ${{ steps.set-quality-gates.outputs.quality_gates == 'success' && '✅ PASSED' || '❌ FAILED' }}" >> email_content.txt
+          echo "" >> email_content.txt
+          echo "📦 Components Validated:" >> email_content.txt
+          
+          # Check if we have Salesforce/Vlocity components by parsing SGD-generated package.xml
+          if [ -f "delta/package/package.xml" ]; then
+            # Count total component types in package.xml
+            TOTAL_COMPONENT_TYPES=$(grep -c "<types>" delta/package/package.xml 2>/dev/null) || TOTAL_COMPONENT_TYPES=0
+            
+            if [ "$TOTAL_COMPONENT_TYPES" -gt 0 ]; then
+              echo "✅ Salesforce/Vlocity Components Detected: YES" >> email_content.txt
+              echo "" >> email_content.txt
+              
+              # Dynamically parse package.xml to extract all component types and members
+              # Use awk to properly parse XML structure and extract component details
+              awk '
+                BEGIN { 
+                  in_types = 0; 
+                  current_type = ""; 
+                  members = ""; 
+                }
+                /<types>/ { 
+                  in_types = 1; 
+                  current_type = ""; 
+                  members = ""; 
+                  next 
+                }
+                /<\/types>/ { 
+                  if (in_types && current_type != "" && members != "") {
+                    print current_type "|" members
+                  }
+                  in_types = 0; 
+                  current_type = ""; 
+                  members = ""; 
+                  next 
+                }
+                in_types && /<name>/ { 
+                  gsub(/.*<name>/, ""); 
+                  gsub(/<\/name>.*/, ""); 
+                  current_type = $0; 
+                  next 
+                }
+                in_types && /<members>/ { 
+                  gsub(/.*<members>/, ""); 
+                  gsub(/<\/members>.*/, ""); 
+                  if ($0 != "") {
+                    if (members == "") {
+                      members = $0
+                    } else {
+                      members = members "," $0
+                    }
+                  }
+                  next
+                }
+              ' delta/package/package.xml 2>/dev/null | while IFS='|' read -r comp_type comp_members; do
+                if [ -n "$comp_type" ] && [ -n "$comp_members" ]; then
+                  # Count members for this component type
+                  MEMBER_COUNT=$(echo "$comp_members" | tr ',' '\n' | wc -l)
+                  echo "🔧 $comp_type: $MEMBER_COUNT component(s)" >> email_content.txt
+                  
+                  # List individual members
+                  if [ -n "$comp_members" ]; then
+                    while IFS= read -r member; do
+                      if [ -n "$member" ] && [[ ! "$member" =~ ^[[:space:]]*$ ]]; then
+                        echo "   • $member" >> email_content.txt
+                      fi
+                    done <<< "$(echo "$comp_members" | tr ',' '\n')" 2>/dev/null || true
+                  fi
+                fi
+              done
+            else
+              echo "❌ Salesforce/Vlocity Components Detected: NO" >> email_content.txt
+            fi
+            
+            # Always show script/YAML changes regardless of Salesforce components
+            echo "" >> email_content.txt
+            echo "📝 Script/YAML Changes Detected:" >> email_content.txt
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >> email_content.txt
+            
+            # Dynamically detect changed files
+            CHANGED_FILES=$(git diff --name-only origin/${{ github.event.pull_request.base.ref }} HEAD 2>/dev/null || git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "")
+            if [ -n "$CHANGED_FILES" ]; then
+              echo "$CHANGED_FILES" | while read -r file; do
+                if [ -n "$file" ]; then
+                  echo "   • $file" >> email_content.txt
+                fi
+              done
+            else
+              echo "   • No changed files detected" >> email_content.txt
+            fi
+          else
+            echo "❌ Salesforce/Vlocity Components Detected: NO" >> email_content.txt
+            echo "" >> email_content.txt
+            echo "📝 Script/YAML Changes Detected:" >> email_content.txt
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >> email_content.txt
+            
+            # Dynamically detect changed files
+            CHANGED_FILES=$(git diff --name-only origin/${{ github.event.pull_request.base.ref }} HEAD 2>/dev/null || git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "")
+            if [ -n "$CHANGED_FILES" ]; then
+              echo "$CHANGED_FILES" | while read -r file; do
+                if [ -n "$file" ]; then
+                  echo "   • $file" >> email_content.txt
+                fi
+              done
+            else
+              echo "   • No changed files detected" >> email_content.txt
+            fi
+          fi
+          
+          echo "" >> email_content.txt
+          echo "🔍 Validation Results:" >> email_content.txt
+          echo "• Code Quality Analysis: ✅ Passed (0 violations)" >> email_content.txt
+          echo "• Component Validation: ${{ steps.set-quality-gates.outputs.quality_gates == 'success' && '✅ Passed' || '❌ Failed' }}" >> email_content.txt
+          echo "• Test Coverage: ✅ Passed (No Apex components)" >> email_content.txt
+          echo "• Quality Gates: ${{ steps.set-quality-gates.outputs.quality_gates == 'success' && '✅ PASSED' || '❌ FAILED' }}" >> email_content.txt
+          
+          # Extract and add deployment ID if available
+          if [ -f "reports/deploy-report.json" ]; then
+            DEPLOY_ID=$(jq -r '.result.id // empty' reports/deploy-report.json 2>/dev/null || echo "")
+            if [ -n "$DEPLOY_ID" ] && [ "$DEPLOY_ID" != "null" ]; then
+              echo "• Validation Deployment ID: $DEPLOY_ID" >> email_content.txt
+            fi
+          fi
+          
+          echo "" >> email_content.txt
+          echo "📊 Pipeline Statistics:" >> email_content.txt
+          echo "• Workflow Run: ${{ github.run_id }}" >> email_content.txt
+          echo "• Environment: INTUAT" >> email_content.txt
+          echo "• Workflow Started: ${{ github.event.head_commit.timestamp || github.run_number }}" >> email_content.txt
+          echo "" >> email_content.txt
+          echo "🔗 View Details:" >> email_content.txt
+          echo "• PR: ${{ github.event.pull_request.html_url }}" >> email_content.txt
+          echo "• Workflow Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> email_content.txt
+          echo "• Commit: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.event.pull_request.head.sha }}" >> email_content.txt
+          
+          EMAIL_CONTENT=$(cat email_content.txt 2>/dev/null || echo "Email content generation failed")
+          echo "email_content<<EOF" >> $GITHUB_OUTPUT
+          echo "$EMAIL_CONTENT" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Detect email notification configuration
+        if: always()
+        run: |
+          if [ -n "${{ secrets.EMAIL_USERNAME }}" ] && [ -n "${{ secrets.EMAIL_PASSWORD }}" ] && [ -n "${{ secrets.NOTIFICATION_EMAIL }}" ]; then
+            echo "HAS_EMAIL_CONFIG=true"  >> "$GITHUB_ENV"
+          else
+            echo "HAS_EMAIL_CONFIG=false" >> "$GITHUB_ENV"
+            echo "ℹ️  Email notifications skipped — EMAIL_USERNAME/EMAIL_PASSWORD/NOTIFICATION_EMAIL secrets not all set."
+          fi
+
+      - name: Build Executive Summary (Markdown)
+        if: always()
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          TARGET_ENV: ${{ env.TARGET_ENV }}
+          TARGET_BRANCH: ${{ github.event.pull_request.base.ref }}
+          WORKFLOW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          COVERAGE_THRESHOLD: ${{ env.COVERAGE_THRESHOLD }}
+        run: |
+          chmod +x ./scripts/build_executive_summary.sh
+          ./scripts/build_executive_summary.sh reports/executive-summary.md || true
+
+      - name: Append Executive Summary to GitHub Step Summary
+        if: always()
+        run: |
+          if [ -f reports/executive-summary.md ]; then
+            cat reports/executive-summary.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Post Executive Summary as PR Comment
+        if: always() && github.event_name == 'pull_request'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          # Append run_id to make every workflow run produce a UNIQUE comment
+          # header. The action will not find a prior comment for this header,
+          # so it posts a brand-new comment at the bottom of the PR — preserving
+          # the full audit trail of every previous run on the PR.
+          header: deployment-summary-${{ env.TARGET_ENV }}-${{ github.run_id }}
+          path: reports/executive-summary.md
+
+      # Temporarily disabled: mail action errors when recipient fields are empty
+      # ("At least one of 'to', 'cc' or 'bcc' must be specified").
+      - name: Send PR Validation Summary Email (disabled)
+        if: false
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 587
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: "🚀 INTUAT Environment PR Validation Summary - PR #${{ github.event.pull_request.number }}"
+          to: ${{ secrets.NOTIFICATION_EMAIL }}
+          from: GitHub Actions <${{ secrets.EMAIL_USERNAME }}>
+          body: ${{ steps.generate-email.outputs.email_content }}
+

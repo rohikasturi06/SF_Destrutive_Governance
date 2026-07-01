@@ -1,0 +1,57 @@
+name: Sync Repository Labels
+
+# Phase 1.1 — Define the standardized test-level labels in the repository.
+# Idempotent: creating a label that already exists is treated as an update.
+# Run it manually whenever .github/labels.yml changes.
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/labels.yml'
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  sync-labels:
+    name: Create / update test-level labels
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Sync labels from .github/labels.yml
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          sudo apt-get update -y && sudo apt-get install -y jq
+
+          # Convert the YAML label definitions to JSON without extra deps by
+          # parsing the simple, fixed structure with awk. Each record begins at
+          # a "- name:" line. Values are emitted as tab-separated triples.
+          parse_labels() {
+            awk '
+              /^- name:/      { if (have) print name "\t" color "\t" desc; have=1; name=""; color=""; desc="" }
+              /^- name:/      { sub(/^- name:[[:space:]]*/, ""); gsub(/^"|"$/, ""); name=$0; next }
+              /^[[:space:]]+color:/       { line=$0; sub(/^[[:space:]]+color:[[:space:]]*/, "", line); gsub(/^"|"$/, "", line); color=line; next }
+              /^[[:space:]]+description:/ { line=$0; sub(/^[[:space:]]+description:[[:space:]]*/, "", line); gsub(/^"|"$/, "", line); desc=line; next }
+              END { if (have) print name "\t" color "\t" desc }
+            ' .github/labels.yml
+          }
+
+          parse_labels | while IFS=$'\t' read -r NAME COLOR DESC; do
+            [ -z "$NAME" ] && continue
+            echo "🔖 Ensuring label: $NAME"
+            # Try update first; if the label does not exist, create it.
+            if ! gh label edit "$NAME" --color "$COLOR" --description "$DESC" --repo "$REPO" 2>/dev/null; then
+              gh label create "$NAME" --color "$COLOR" --description "$DESC" --repo "$REPO" --force
+            fi
+          done
+
+          echo "✅ Label sync complete."

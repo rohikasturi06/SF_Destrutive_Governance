@@ -1,0 +1,128 @@
+{
+  "status": 0,
+  "result": {
+    "checkOnly": true,
+    "completedDate": "2025-10-06T11:32:43.000Z",
+    "createdBy": "005KZ000002ermw",
+    "createdByName": "Rrohit Sayi Kasturi",
+    "createdDate": "2025-10-06T11:32:19.000Z",
+    "details": {
+      "componentFailures": [
+        {
+          "changed": false,
+          "columnNumber": 20,
+          "componentType": "Profile",
+          "created": false,
+          "createdDate": "2025-10-06T11:32:42.000Z",
+          "deleted": false,
+          "fileName": "profiles/DummyProfile.profile",
+          "fullName": "DummyProfile",
+          "lineNumber": 5,
+          "problem": "Error parsing file: Element {http://soap.sforce.com/2006/04/metadata}SundayEnd invalid at this location in type ProfileLoginHours",
+          "problemType": "Error",
+          "success": false
+        }
+      ],
+      "componentSuccesses": [
+        {
+          "changed": true,
+          "componentType": "ApexClass",
+          "created": true,
+          "createdDate": "2025-10-06T11:32:42.000Z",
+          "deleted": false,
+          "fileName": "classes/HelloWorld.cls",
+          "fullName": "HelloWorld",
+          "id": "01pKZ000000yuw4YAA",
+          "success": true
+        },
+        {
+          "changed": true,
+          "componentType": "",
+          "created": false,
+          "createdDate": "2025-10-06T11:32:42.000Z",
+          "deleted": false,
+          "fileName": "package.xml",
+          "fullName": "package.xml",
+          "success": true
+        },
+        {
+          "changed": true,
+          "componentType": "ApexClass",
+          "created": true,
+          "createdDate": "2025-10-06T11:32:42.000Z",
+          "deleted": false,
+          "fileName": "classes/HelloWorldTest.cls",
+          "fullName": "HelloWorldTest",
+          "id": "01pKZ000000yuw5YAA",
+          "success": true
+        }
+      ],
+      "runTestResult": {
+        "numFailures": 0,
+        "numTestsRun": 0,
+        "totalTime": 0,
+        "codeCoverage": [],
+        "codeCoverageWarnings": [],
+        "failures": [],
+        "flowCoverage": [],
+        "flowCoverageWarnings": [],
+        "successes": []
+      }
+    },
+    "done": true,
+    "id": "0AfKZ000004kM8p0AE",
+    "ignoreWarnings": false,
+    "lastModifiedDate": "2025-10-06T11:32:43.000Z",
+    "numberComponentErrors": 1,
+    "numberComponentsDeployed": 2,
+    "numberComponentsTotal": 3,
+    "numberFiles": "8",
+    "numberTestErrors": 0,
+    "numberTestsCompleted": 0,
+    "numberTestsTotal": 0,
+    "rollbackOnError": true,
+    "runTestsEnabled": true,
+    "startDate": "2025-10-06T11:32:40.000Z",
+    "stateDetail": "Processing Type: Profile",
+    "status": "Failed",
+    "success": false,
+    "zipSize": "1603",
+    "files": [
+      {
+        "fullName": "HelloWorld",
+        "type": "ApexClass",
+        "state": "Created",
+        "filePath": "/Users/rkasturi/GITHUB_ACTIONS_PERSONAL_DEMO/GITHUBACTIONS-DEMO/force-app/main/default/classes/HelloWorld.cls"
+      },
+      {
+        "fullName": "HelloWorld",
+        "type": "ApexClass",
+        "state": "Created",
+        "filePath": "/Users/rkasturi/GITHUB_ACTIONS_PERSONAL_DEMO/GITHUBACTIONS-DEMO/force-app/main/default/classes/HelloWorld.cls-meta.xml"
+      },
+      {
+        "fullName": "HelloWorldTest",
+        "type": "ApexClass",
+        "state": "Created",
+        "filePath": "/Users/rkasturi/GITHUB_ACTIONS_PERSONAL_DEMO/GITHUBACTIONS-DEMO/force-app/main/default/classes/HelloWorldTest.cls"
+      },
+      {
+        "fullName": "HelloWorldTest",
+        "type": "ApexClass",
+        "state": "Created",
+        "filePath": "/Users/rkasturi/GITHUB_ACTIONS_PERSONAL_DEMO/GITHUBACTIONS-DEMO/force-app/main/default/classes/HelloWorldTest.cls-meta.xml"
+      },
+      {
+        "fullName": "DummyProfile",
+        "type": "Profile",
+        "state": "Failed",
+        "problemType": "Error",
+        "filePath": "/Users/rkasturi/GITHUB_ACTIONS_PERSONAL_DEMO/GITHUBACTIONS-DEMO/force-app/main/default/profiles/DummyProfile.profile-meta.xml",
+        "lineNumber": 5,
+        "columnNumber": 20,
+        "error": "Error parsing file: Element {http://soap.sforce.com/2006/04/metadata}SundayEnd invalid at this location in type ProfileLoginHours (5:20)"
+      }
+    ]
+  },
+  "warnings": []
+}

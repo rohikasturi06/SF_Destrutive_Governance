@@ -1,12 +1,8 @@
-﻿{
+{
   "packageDirectories": [
-    {
-      "path": "src/salesforce/force-app",
-      "default": true
-    }
+    { "path": "force-app", "default": true }
   ],
-  "name": "SF_Destrutive_Governance",
   "namespace": "",
   "sfdcLoginUrl": "https://login.salesforce.com",
-  "sourceApiVersion": "62.0"
+  "sourceApiVersion": "64.0"
 }

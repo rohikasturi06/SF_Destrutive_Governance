@@ -1,0 +1,133 @@
+{
+  "status": 0,
+  "result": {
+    "checkOnly": true,
+    "completedDate": "2025-10-06T11:34:21.000Z",
+    "createdBy": "005KZ000002ermw",
+    "createdByName": "Rrohit Sayi Kasturi",
+    "createdDate": "2025-10-06T11:33:54.000Z",
+    "details": {
+      "componentSuccesses": [
+        {
+          "changed": true,
+          "componentType": "ApexClass",
+          "created": true,
+          "createdDate": "2025-10-06T11:33:55.000Z",
+          "deleted": false,
+          "fileName": "classes/HelloWorld.cls",
+          "fullName": "HelloWorld",
+          "id": "01pKZ000000yuw9YAA",
+          "success": true
+        },
+        {
+          "changed": true,
+          "componentType": "",
+          "created": false,
+          "createdDate": "2025-10-06T11:33:55.000Z",
+          "deleted": false,
+          "fileName": "package.xml",
+          "fullName": "package.xml",
+          "success": true
+        },
+        {
+          "changed": true,
+          "componentType": "ApexClass",
+          "created": true,
+          "createdDate": "2025-10-06T11:33:55.000Z",
+          "deleted": false,
+          "fileName": "classes/HelloWorldTest.cls",
+          "fullName": "HelloWorldTest",
+          "id": "01pKZ000000yuwAYAQ",
+          "success": true
+        }
+      ],
+      "runTestResult": {
+        "codeCoverage": [
+          {
+            "id": "01pKZ000000yuw9YAA",
+            "name": "HelloWorld",
+            "namespace": null,
+            "numLocations": 4,
+            "numLocationsNotCovered": 0,
+            "type": "Class",
+            "dmlInfo": [],
+            "locationsNotCovered": [],
+            "methodInfo": [],
+            "soqlInfo": [],
+            "soslInfo": []
+          }
+        ],
+        "numFailures": 0,
+        "numTestsRun": 2,
+        "successes": [
+          {
+            "id": "01pKZ000000yuwAYAQ",
+            "methodName": "greet_blankName_returnsDefault",
+            "name": "HelloWorldTest",
+            "namespace": null,
+            "time": 485
+          },
+          {
+            "id": "01pKZ000000yuwAYAQ",
+            "methodName": "greet_withName_returnsPersonalizedMessage",
+            "name": "HelloWorldTest",
+            "namespace": null,
+            "time": 140
+          }
+        ],
+        "totalTime": 739,
+        "codeCoverageWarnings": [],
+        "failures": [],
+        "flowCoverage": [],
+        "flowCoverageWarnings": []
+      },
+      "componentFailures": []
+    },
+    "done": true,
+    "id": "0AfKZ000004kM8z0AE",
+    "ignoreWarnings": false,
+    "lastModifiedDate": "2025-10-06T11:34:21.000Z",
+    "numberComponentErrors": 0,
+    "numberComponentsDeployed": 2,
+    "numberComponentsTotal": 2,
+    "numberFiles": "6",
+    "numberTestErrors": 0,
+    "numberTestsCompleted": 2,
+    "numberTestsTotal": 2,
+    "rollbackOnError": true,
+    "runTestsEnabled": true,
+    "startDate": "2025-10-06T11:33:54.000Z",
+    "status": "Succeeded",
+    "success": true,
+    "zipSize": 1506,
+    "files": [
+      {
+        "fullName": "HelloWorld",
+        "type": "ApexClass",
+        "state": "Created",
+        "filePath": "/Users/rkasturi/GITHUB_ACTIONS_PERSONAL_DEMO/GITHUBACTIONS-DEMO/force-app/main/default/classes/HelloWorld.cls"
+      },
+      {
+        "fullName": "HelloWorld",
+        "type": "ApexClass",
+        "state": "Created",
+        "filePath": "/Users/rkasturi/GITHUB_ACTIONS_PERSONAL_DEMO/GITHUBACTIONS-DEMO/force-app/main/default/classes/HelloWorld.cls-meta.xml"
+      },
+      {
+        "fullName": "HelloWorldTest",
+        "type": "ApexClass",
+        "state": "Created",
+        "filePath": "/Users/rkasturi/GITHUB_ACTIONS_PERSONAL_DEMO/GITHUBACTIONS-DEMO/force-app/main/default/classes/HelloWorldTest.cls"
+      },
+      {
+        "fullName": "HelloWorldTest",
+        "type": "ApexClass",
+        "state": "Created",
+        "filePath": "/Users/rkasturi/GITHUB_ACTIONS_PERSONAL_DEMO/GITHUBACTIONS-DEMO/force-app/main/default/classes/HelloWorldTest.cls-meta.xml"
+      }
+    ],
+    "zipFileCount": 5,
+    "deployUrl": "https://analytics-web-dev.my.salesforce.com/lightning/setup/DeployStatus/page?address=%2Fchangemgmt%2FmonitorDeploymentsDetails.apexp%3FasyncId%3D0AfKZ000004kM8z0AE%26retURL%3D%252Fchangemgmt%252FmonitorDeployment.apexp"
+  },
+  "warnings": []
+}
