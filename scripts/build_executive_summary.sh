@@ -115,6 +115,10 @@ DEPLOY_STATUS="Unknown"
 COMPONENT_FAILURES=0
 TEST_FAILURES=0
 COVERAGE=0
+# Distinguish "coverage measured as 0%" from "no coverage data was reported at
+# all" (e.g. NoTestRun, or Salesforce ran no tests that touch the changed
+# classes). Only the former should ever render red — the latter is N/A.
+HAS_COVERAGE_DATA="false"
 
 if [ -f reports/deploy-report.json ]; then
   DEPLOY_STATUS=$(jq -r '.result.status // "Unknown"' reports/deploy-report.json 2>/dev/null || echo Unknown)
@@ -124,7 +128,9 @@ if [ -f reports/deploy-report.json ]; then
   if jq -e '.result.details.runTestResult.failures' reports/deploy-report.json >/dev/null 2>&1; then
     TEST_FAILURES=$(jq '.result.details.runTestResult.failures | length' reports/deploy-report.json 2>/dev/null || echo 0)
   fi
-  if jq -e '.result.details.runTestResult.codeCoverage' reports/deploy-report.json >/dev/null 2>&1; then
+  # Coverage data only counts if the codeCoverage array is actually non-empty.
+  if jq -e '(.result.details.runTestResult.codeCoverage // []) | length > 0' reports/deploy-report.json >/dev/null 2>&1; then
+    HAS_COVERAGE_DATA="true"
     COVERAGE=$(jq -r '[.result.details.runTestResult.codeCoverage[]? | (.coveredPercent // 0)] | (if length>0 then (add/length|floor) else 0 end)' reports/deploy-report.json 2>/dev/null || echo 0)
   fi
 fi
@@ -193,12 +199,20 @@ else
 fi
 
 if [ "$HAS_APEX_CHANGES" = "true" ]; then
-  if [ "${COVERAGE:-0}" -ge "$COVERAGE_THRESHOLD" ]; then
-    COV_STATUS="🟢 ${COVERAGE}%"
-    COV_NOTE="≥ ${COVERAGE_THRESHOLD}% threshold"
+  if [ "$HAS_COVERAGE_DATA" = "true" ]; then
+    if [ "${COVERAGE:-0}" -ge "$COVERAGE_THRESHOLD" ]; then
+      COV_STATUS="🟢 ${COVERAGE}%"
+      COV_NOTE="≥ ${COVERAGE_THRESHOLD}% threshold"
+    else
+      COV_STATUS="🔴 ${COVERAGE}%"
+      COV_NOTE="< ${COVERAGE_THRESHOLD}% threshold"
+    fi
   else
-    COV_STATUS="🔴 ${COVERAGE}%"
-    COV_NOTE="< ${COVERAGE_THRESHOLD}% threshold"
+    # Apex changed but Salesforce reported no coverage figures. This is NOT a
+    # measured 0% — it means no test exercised the changed classes in this run.
+    # Show it as neutral so it never contradicts a PASSED dry-run.
+    COV_STATUS="⚪ N/A"
+    COV_NOTE="No coverage data reported — no Apex tests ran against the changed classes"
   fi
 else
   COV_STATUS="🟢 N/A"
