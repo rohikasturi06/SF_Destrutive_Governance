@@ -148,14 +148,21 @@ else
   #     a conflict. Matches a plain checked box: "- [x] RunSpecifiedTests"
   #     (optionally "- [x] RunSpecifiedTests: ClassA, ClassB"). Case-insensitive
   #     on "[x]"; the trailing "([[:space:]]|:|$)" anchors the level name.
+  # Robust to BOTH formats:
+  #   plain (current template):   "- [x] NoTestRun"
+  #   legacy nested code-span:    "- [x] `- [x] NoTestRun`"
+  # We only require the OUTER box to be checked ("- [x]") and the level name to
+  # appear somewhere on that same line. The "Specified Target Apex Classes
+  # (Mandatory for RunSpecifiedTests)" header is NOT a "- [x]" line, so it can't
+  # false-match. Case-insensitive on the checkbox mark.
   CHECKBOX_MATCH=""
-  if   printf '%s' "$PR_BODY" | grep -qiE '^[[:space:]]*- \[x\][[:space:]]+NoTestRun([[:space:]]|:|$)'; then
+  if   printf '%s' "$PR_BODY" | grep -qiE '^[[:space:]]*- \[x\].*NoTestRun'; then
     CHECKBOX_MATCH="NoTestRun"
-  elif printf '%s' "$PR_BODY" | grep -qiE '^[[:space:]]*- \[x\][[:space:]]+RunSpecifiedTests([[:space:]]|:|$)'; then
+  elif printf '%s' "$PR_BODY" | grep -qiE '^[[:space:]]*- \[x\].*RunSpecifiedTests'; then
     CHECKBOX_MATCH="RunSpecifiedTests"
-  elif printf '%s' "$PR_BODY" | grep -qiE '^[[:space:]]*- \[x\][[:space:]]+RunAllTestsInOrg([[:space:]]|:|$)'; then
+  elif printf '%s' "$PR_BODY" | grep -qiE '^[[:space:]]*- \[x\].*RunAllTestsInOrg'; then
     CHECKBOX_MATCH="RunAllTestsInOrg"
-  elif printf '%s' "$PR_BODY" | grep -qiE '^[[:space:]]*- \[x\][[:space:]]+RunLocalTests([[:space:]]|:|$)'; then
+  elif printf '%s' "$PR_BODY" | grep -qiE '^[[:space:]]*- \[x\].*RunLocalTests'; then
     CHECKBOX_MATCH="RunLocalTests"
   fi
 
