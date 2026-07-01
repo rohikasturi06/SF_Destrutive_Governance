@@ -107,26 +107,33 @@ if has_any_deployable; then
   echo "$PRIMARY_TEST_LEVEL" > reports/test-level.txt
 
   # --------------------------------------------------------------------------
-  # GOVERNANCE GATE: a changed regular Apex class with NO test class can never
-  # reach the coverage requirement (Salesforce rolls the deploy back). Block
-  # BEFORE touching the org and surface a clear reason in the PR summary —
-  # unless the selected level is NoTestRun (no coverage is evaluated then).
+  # GOVERNANCE GATE: a changed Apex class that is NOT registered in the test map
+  # (config/test-map.yaml) has no test to run and cannot meet the coverage
+  # requirement. Block BEFORE touching the org and surface a clear reason in the
+  # PR summary — unless the selected level is NoTestRun (no coverage evaluated).
   # --------------------------------------------------------------------------
-  if [ "$PRIMARY_TEST_LEVEL" != "NoTestRun" ] && [ -n "${UNTESTED_CLASSES:-}" ]; then
+  if [ "$PRIMARY_TEST_LEVEL" != "NoTestRun" ] && [ -n "${UNMAPPED_CLASSES:-}" ]; then
     {
-      echo "### 🛑 DEPLOYMENT BLOCKED — Missing Apex Test Coverage"
+      echo "### 🛑 DEPLOYMENT BLOCKED — Missing Test Mapping"
       echo ""
-      echo "These changed Apex class(es) have **no associated test class** in the repository, so they cannot meet the ${COVERAGE_THRESHOLD:-75}% coverage requirement under \`${PRIMARY_TEST_LEVEL}\`:"
+      echo "These changed Apex class(es) are **not mapped to a test class** in \`config/test-map.yaml\`, so their tests cannot run under \`${PRIMARY_TEST_LEVEL}\`:"
       echo ""
       echo '```text'
-      for c in ${UNTESTED_CLASSES}; do echo "  • ${c}"; done
+      for c in ${UNMAPPED_CLASSES}; do echo "  • ${c}"; done
       echo '```'
       echo ""
-      echo "**Action:** add a test class (e.g. \`<Class>Test\`) that exercises each to >= ${COVERAGE_THRESHOLD:-75}%, or select \`NoTestRun\` (sandboxes only) if this change legitimately requires no Apex tests."
+      echo "**Action:** commit a test class for each, then register it in \`config/test-map.yaml\`:"
+      echo ""
+      echo '```yaml'
+      echo "<ChangedClass>:"
+      echo "  - <YourTestClass>"
+      echo '```'
+      echo ""
+      echo "Or select \`NoTestRun\` (sandboxes only) if this change legitimately requires no Apex tests."
     } > reports/dependency-errors.md
 
-    summary "🛑 BLOCKED — changed regular class(es) without a test class: ${UNTESTED_CLASSES}"
-    echo "::error::No test class found for: ${UNTESTED_CLASSES}. Add tests or use NoTestRun. See the PR summary for details."
+    summary "🛑 BLOCKED — changed Apex not in test map: ${UNMAPPED_CLASSES}"
+    echo "::error::Not in config/test-map.yaml: ${UNMAPPED_CLASSES}. Add a test class and register it in the test map, or use NoTestRun."
     record_result failure
     exit 1
   fi

@@ -1,0 +1,28 @@
+# ==============================================================================
+# Apex Test Map  (developer-maintained — single source of truth)
+# ==============================================================================
+# Maps each regular Apex class / trigger to the test class(es) that cover it.
+# The CI validation runs these mapped tests (RunSpecifiedTests).
+#
+# RULES (read before editing):
+#   1. Every regular Apex class/trigger that can change MUST have an entry here.
+#   2. When you ADD or MODIFY an Apex class:
+#        - commit its test class, AND
+#        - add/update its entry below.
+#   3. A changed class that is NOT listed here BLOCKS the PR with a clear message.
+#      (Test classes themselves do not need their own entry — listing them as a
+#      value below is enough for them to run when changed.)
+#
+# FORMAT:
+#   <ClassOrTriggerName>:
+#     - <TestClassName>
+#     - <AnotherTestClass>
+# ==============================================================================
+
+DependencyTestHelper:
+  - DependencyTestCoreTests
+  - DependencyTestHelperTest
+
+# --- Add new mappings below (example) ----------------------------------------
+# AccountTriggerHandler:
+#   - AccountTriggerHandlerTest
