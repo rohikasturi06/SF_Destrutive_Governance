@@ -106,6 +106,31 @@ if has_any_deployable; then
   summary "🧪 Test Strategy: ${PRIMARY_TEST_LEVEL}"
   echo "$PRIMARY_TEST_LEVEL" > reports/test-level.txt
 
+  # --------------------------------------------------------------------------
+  # GOVERNANCE GATE: a changed regular Apex class with NO test class can never
+  # reach the coverage requirement (Salesforce rolls the deploy back). Block
+  # BEFORE touching the org and surface a clear reason in the PR summary —
+  # unless the selected level is NoTestRun (no coverage is evaluated then).
+  # --------------------------------------------------------------------------
+  if [ "$PRIMARY_TEST_LEVEL" != "NoTestRun" ] && [ -n "${UNTESTED_CLASSES:-}" ]; then
+    {
+      echo "### 🛑 DEPLOYMENT BLOCKED — Missing Apex Test Coverage"
+      echo ""
+      echo "These changed Apex class(es) have **no associated test class** in the repository, so they cannot meet the ${COVERAGE_THRESHOLD:-75}% coverage requirement under \`${PRIMARY_TEST_LEVEL}\`:"
+      echo ""
+      echo '```text'
+      for c in ${UNTESTED_CLASSES}; do echo "  • ${c}"; done
+      echo '```'
+      echo ""
+      echo "**Action:** add a test class (e.g. \`<Class>Test\`) that exercises each to >= ${COVERAGE_THRESHOLD:-75}%, or select \`NoTestRun\` (sandboxes only) if this change legitimately requires no Apex tests."
+    } > reports/dependency-errors.md
+
+    summary "🛑 BLOCKED — changed regular class(es) without a test class: ${UNTESTED_CLASSES}"
+    echo "::error::No test class found for: ${UNTESTED_CLASSES}. Add tests or use NoTestRun. See the PR summary for details."
+    record_result failure
+    exit 1
+  fi
+
   # Is there an explicit --tests list in the resolved plan?
   PRIMARY_HAS_TESTS="false"
   for ((i=0; i<${#PRIMARY_ARGS[@]}; i++)); do

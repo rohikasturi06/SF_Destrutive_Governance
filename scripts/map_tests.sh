@@ -132,26 +132,40 @@ echo "  • Test classes: ${ALL_TESTS:-none}"
 # name (word-boundary match).
 # ------------------------------------------------------------------------------
 MAPPED_TESTS=""
+UNTESTED_CLASSES=""
 
 # Pre-compute every @isTest class file in the repo once.
 REPO_TEST_FILES=$(grep -rilE '@istest' force-app --include='*.cls' 2>/dev/null || true)
 
-if [ -n "$ALL_CLASSES" ] && [ -n "$REPO_TEST_FILES" ]; then
+if [ -n "$ALL_CLASSES" ]; then
   echo ""
   echo "🔗 Mapping changed classes to their test classes (repo-wide):"
   for cls in $ALL_CLASSES; do
-    while IFS= read -r test_file; do
-      [ -z "$test_file" ] && continue
-      if grep -qE "\b${cls}\b" "$test_file" 2>/dev/null; then
-        test_name=$(basename "$test_file" .cls)
-        echo "  ✓ ${test_name} tests ${cls}"
-        MAPPED_TESTS="$MAPPED_TESTS $test_name"
-      fi
-    done <<EOF
+    cls_has_test=""
+    if [ -n "$REPO_TEST_FILES" ]; then
+      while IFS= read -r test_file; do
+        [ -z "$test_file" ] && continue
+        if grep -qE "\b${cls}\b" "$test_file" 2>/dev/null; then
+          test_name=$(basename "$test_file" .cls)
+          echo "  ✓ ${test_name} tests ${cls}"
+          MAPPED_TESTS="$MAPPED_TESTS $test_name"
+          cls_has_test="yes"
+        fi
+      done <<EOF
 $REPO_TEST_FILES
 EOF
+    fi
+    # A changed regular class with no test class anywhere can never meet the 75%
+    # coverage requirement — flag it so the validation step can block early.
+    if [ -z "$cls_has_test" ]; then
+      echo "  ✗ ${cls} → NO test class found (uncoverable)"
+      UNTESTED_CLASSES="$UNTESTED_CLASSES $cls"
+    fi
   done
 fi
+
+UNTESTED_CLASSES=$(echo "$UNTESTED_CLASSES" | xargs -n1 2>/dev/null | sort -u | xargs || echo "")
+echo "UNTESTED_CLASSES=$UNTESTED_CLASSES" >> "$GITHUB_ENV"
 
 # Always include test classes that are part of this PR's delta (a changed test
 # class should obviously run), on top of the repo-wide matches above.
