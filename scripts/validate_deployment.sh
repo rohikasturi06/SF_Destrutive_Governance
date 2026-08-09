@@ -40,9 +40,40 @@ echo "" > reports/validation-summary.txt
 # behavior is unchanged.
 export REQUIRE_APEX_TESTS="true"
 
+# TEST-LEVEL STRATEGY (highest precedence first):
+#   1. FORCE_TEST_LEVEL  — an explicit PR label / checkbox / dispatch choice.
+#      select_test_args() honors it verbatim (see _deployment_lib.sh).
+#   2. PREFER_RELEVANT_TESTS=true (default) — when Apex changed and NO explicit
+#      level was chosen, prefer RunRelevantTests (Beta): Salesforce auto-selects
+#      the relevant tests from the payload. If the org rejects the Beta level,
+#      we fall back ONCE to RunSpecifiedTests using the mapped RELATED_TESTS.
+#   3. RunSpecifiedTests from config/test-map.yaml — the classic fallback.
+# Set PREFER_RELEVANT_TESTS=false to disable the Beta preference entirely.
+export PREFER_RELEVANT_TESTS="${PREFER_RELEVANT_TESTS:-true}"
+
 # Effective test level actually used for this run, surfaced to the executive
 # summary (reports/test-level.txt). Overwritten below once resolved.
 echo "NoTestRun" > reports/test-level.txt
+# Human-readable reason WHY this level was chosen, shown to end users in the
+# executive summary. Kept in a SEPARATE file so the level parser stays simple.
+echo "no Apex to test" > reports/test-level-reason.txt
+
+# Compute the human-readable selection reason for a resolved level.
+# Args: <level>. Reads FORCE_TEST_LEVEL / PREFER_RELEVANT_TESTS / RELATED_TESTS.
+selection_reason_for() {
+  local lvl="$1"
+  if [ -n "${FORCE_TEST_LEVEL:-}" ]; then
+    echo "selected via PR label/checkbox"
+    return
+  fi
+  case "$lvl" in
+    RunRelevantTests) echo "auto — preferred (Beta: Salesforce picks relevant tests)" ;;
+    RunSpecifiedTests) echo "auto — mapped from config/test-map.yaml" ;;
+    RunLocalTests)     echo "auto — no mapped test found, ran all local tests" ;;
+    NoTestRun)         echo "no Apex to test" ;;
+    *)                 echo "auto-resolved" ;;
+  esac
+}
 
 # Single source of truth for downstream steps. We default to "failure" so that
 # any unexpected `set -e` exit, killed subshell, or early crash is faithfully
@@ -103,8 +134,10 @@ if has_any_deployable; then
       PRIMARY_TEST_LEVEL="${PRIMARY_ARGS[$((i+1))]}"
     fi
   done
-  summary "🧪 Test Strategy: ${PRIMARY_TEST_LEVEL}"
+  PRIMARY_TEST_REASON="$(selection_reason_for "$PRIMARY_TEST_LEVEL")"
+  summary "🧪 Test Strategy: ${PRIMARY_TEST_LEVEL} (${PRIMARY_TEST_REASON})"
   echo "$PRIMARY_TEST_LEVEL" > reports/test-level.txt
+  echo "$PRIMARY_TEST_REASON" > reports/test-level-reason.txt
 
   # --------------------------------------------------------------------------
   # GOVERNANCE GATE: a changed Apex class that is NOT registered in the test map
@@ -218,6 +251,69 @@ if has_any_deployable; then
   if [ -s reports/deploy-report.stderr.log ]; then
     echo "ℹ️  sf stderr (non-fatal warnings):"
     sed 's/^/   /' reports/deploy-report.stderr.log | head -20 || true
+  fi
+
+  # --------------------------------------------------------------------------
+  # GRACEFUL DEGRADATION: RunRelevantTests → RunSpecifiedTests.
+  # RunRelevantTests is a Beta. If THIS org/CLI does not support it, the deploy
+  # is rejected BEFORE any test runs. In that (and ONLY that) case we fall back
+  # once to RunSpecifiedTests using the mapped RELATED_TESTS. relevant_level_
+  # rejected() guarantees we NEVER fall back when tests actually ran and failed
+  # (that would hide a real failure).
+  # --------------------------------------------------------------------------
+  if [ "$PRIMARY_TEST_LEVEL" = "RunRelevantTests" ] \
+     && relevant_level_rejected reports/deploy-report.json reports/deploy-report.stderr.log; then
+    summary "⚠️  RunRelevantTests not available in this org (Beta not enabled/supported) — falling back to RunSpecifiedTests."
+    echo "::warning::RunRelevantTests was rejected by the org; falling back to RunSpecifiedTests from config/test-map.yaml."
+
+    # Rebuild args WITHOUT the Beta preference so select_test_args() yields the
+    # classic RunSpecifiedTests --tests <mapped> plan.
+    declare -a FALLBACK_ARGS=()
+    PREFER_RELEVANT_TESTS="false" read_deploy_args_into FALLBACK_ARGS validate "${ORG_NAME:-sandbox}"
+
+    PRIMARY_TEST_LEVEL="NoTestRun"
+    for ((i=0; i<${#FALLBACK_ARGS[@]}; i++)); do
+      if [ "${FALLBACK_ARGS[$i]}" = "--test-level" ]; then
+        PRIMARY_TEST_LEVEL="${FALLBACK_ARGS[$((i+1))]}"
+      fi
+    done
+
+    # If the fallback produced a test-less RunSpecifiedTests (no mapped tests),
+    # surface the same hard, actionable error the automatic path uses instead of
+    # running an invalid, wasteful plan.
+    FALLBACK_HAS_TESTS="false"
+    for ((i=0; i<${#FALLBACK_ARGS[@]}; i++)); do
+      if [ "${FALLBACK_ARGS[$i]}" = "--tests" ]; then FALLBACK_HAS_TESTS="true"; break; fi
+    done
+    if [ "$PRIMARY_TEST_LEVEL" = "RunSpecifiedTests" ] && [ "$FALLBACK_HAS_TESTS" = "false" ]; then
+      echo "NO_TEST_FOUND" > reports/test-level.txt
+      echo "RunRelevantTests unavailable and no mapped test in config/test-map.yaml" > reports/test-level-reason.txt
+      summary "❌ RunRelevantTests unavailable AND no mapped Apex test to fall back to."
+      echo "::error::RunRelevantTests is not enabled and no test class is mapped in config/test-map.yaml. Map a *Test class or choose RunLocalTests."
+      record_result failure
+      exit 1
+    fi
+
+    PRIMARY_TEST_REASON="fell back from RunRelevantTests (Beta unavailable) → mapped from config/test-map.yaml"
+    echo "$PRIMARY_TEST_LEVEL" > reports/test-level.txt
+    echo "$PRIMARY_TEST_REASON" > reports/test-level-reason.txt
+    summary "🧪 Test Strategy (fallback): ${PRIMARY_TEST_LEVEL} (${PRIMARY_TEST_REASON})"
+
+    declare -a RUN_ARGS=()
+    for _a in "${FALLBACK_ARGS[@]}"; do
+      [ "$_a" = "--dry-run" ] && continue
+      RUN_ARGS+=("$_a")
+    done
+
+    if sf project deploy validate "${RUN_ARGS[@]}" > reports/deploy-report.json 2>reports/deploy-report.stderr.log; then
+      summary "✅ Validation passed (${PRIMARY_TEST_LEVEL}, fallback)"
+    else
+      summary "⚠️  Validation reported errors (${PRIMARY_TEST_LEVEL}, fallback)"
+    fi
+    if [ -s reports/deploy-report.stderr.log ]; then
+      echo "ℹ️  sf stderr (fallback, non-fatal warnings):"
+      sed 's/^/   /' reports/deploy-report.stderr.log | head -20 || true
+    fi
   fi
 
   # Compute coverage from primary attempt
