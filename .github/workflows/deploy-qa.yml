@@ -4,7 +4,7 @@ on:
   pull_request:
     branches:
       - qa
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled]
     paths-ignore:
       - 'README.md'
       - 'docs/**'

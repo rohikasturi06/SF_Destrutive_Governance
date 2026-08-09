@@ -106,6 +106,38 @@ if has_any_deployable; then
   summary "🧪 Test Strategy: ${PRIMARY_TEST_LEVEL}"
   echo "$PRIMARY_TEST_LEVEL" > reports/test-level.txt
 
+  # --------------------------------------------------------------------------
+  # GOVERNANCE GATE: a changed Apex class that is NOT registered in the test map
+  # (config/test-map.yaml) has no test to run and cannot meet the coverage
+  # requirement. Block BEFORE touching the org and surface a clear reason in the
+  # PR summary — unless the selected level is NoTestRun (no coverage evaluated).
+  # --------------------------------------------------------------------------
+  if [ "$PRIMARY_TEST_LEVEL" != "NoTestRun" ] && [ -n "${UNMAPPED_CLASSES:-}" ]; then
+    {
+      echo "### 🛑 DEPLOYMENT BLOCKED — Missing Test Mapping"
+      echo ""
+      echo "These changed Apex class(es) are **not mapped to a test class** in \`config/test-map.yaml\`, so their tests cannot run under \`${PRIMARY_TEST_LEVEL}\`:"
+      echo ""
+      echo '```text'
+      for c in ${UNMAPPED_CLASSES}; do echo "  • ${c}"; done
+      echo '```'
+      echo ""
+      echo "**Action:** commit a test class for each, then register it in \`config/test-map.yaml\`:"
+      echo ""
+      echo '```yaml'
+      echo "<ChangedClass>:"
+      echo "  - <YourTestClass>"
+      echo '```'
+      echo ""
+      echo "Or select \`NoTestRun\` (sandboxes only) if this change legitimately requires no Apex tests."
+    } > reports/dependency-errors.md
+
+    summary "🛑 BLOCKED — changed Apex not in test map: ${UNMAPPED_CLASSES}"
+    echo "::error::Not in config/test-map.yaml: ${UNMAPPED_CLASSES}. Add a test class and register it in the test map, or use NoTestRun."
+    record_result failure
+    exit 1
+  fi
+
   # Is there an explicit --tests list in the resolved plan?
   PRIMARY_HAS_TESTS="false"
   for ((i=0; i<${#PRIMARY_ARGS[@]}; i++)); do
@@ -131,10 +163,14 @@ if has_any_deployable; then
   fi
 
   echo ""
-  echo "⚙️  EXECUTING DRY-RUN VALIDATION"
+  echo "⚙️  EXECUTING VALIDATION"
   echo "================================"
   echo "📋 Validation Details:"
-  echo "  • Mode: Dry-run (check-only - no actual deployment)"
+  if [ "$PRIMARY_TEST_LEVEL" = "NoTestRun" ]; then
+    echo "  • Command: sf project deploy start --dry-run (no tests)"
+  else
+    echo "  • Command: sf project deploy validate (runs tests, quick-deploy ID)"
+  fi
   echo "  • Test Level: ${PRIMARY_TEST_LEVEL}"
   echo "  • Environment: ${ORG_NAME:-sandbox}"
   if [ "${HAS_DESTRUCTIVE_CHANGES:-false}" = "true" ]; then
@@ -143,15 +179,37 @@ if has_any_deployable; then
   echo ""
 
   summary "🔄 Running validation..."
+  # --------------------------------------------------------------------------
+  # COMMAND MAPPING (critical — a plain `deploy start --dry-run` performs a
+  # STRUCTURAL check only and does NOT execute the Apex tests: the org shows
+  # "Run Apex Tests: Not Run" and coverage 0% even for RunSpecifiedTests).
+  #   NoTestRun  -> sf project deploy start --dry-run   (validate rejects NoTestRun)
+  #   all others -> sf project deploy validate          (ACTUALLY runs the tests
+  #                 and yields a 10-day quick-deploy validation ID)
+  # We strip --dry-run (added by build_deploy_args) and pick the verb per level.
+  # --------------------------------------------------------------------------
+  declare -a RUN_ARGS=()
+  for _a in "${PRIMARY_ARGS[@]}"; do
+    [ "$_a" = "--dry-run" ] && continue
+    RUN_ARGS+=("$_a")
+  done
+
   # IMPORTANT: keep stdout (the --json payload) PURE. Do NOT use `2>&1` here — the
   # sf/Node CLI writes warnings to stderr (e.g. "(node:...) DeprecationWarning:
   # punycode"), which would be prepended to the JSON and make every downstream
-  # `jq` read fail -> coverage misreported as 0% and status as "Failed". Send
-  # stderr to a separate log instead.
-  if sf project deploy start "${PRIMARY_ARGS[@]}" > reports/deploy-report.json 2>reports/deploy-report.stderr.log; then
-    summary "✅ Validation passed (${PRIMARY_TEST_LEVEL})"
+  # `jq` read fail. Send stderr to a separate log instead.
+  if [ "$PRIMARY_TEST_LEVEL" = "NoTestRun" ]; then
+    if sf project deploy start "${RUN_ARGS[@]}" --dry-run > reports/deploy-report.json 2>reports/deploy-report.stderr.log; then
+      summary "✅ Validation passed (NoTestRun / dry-run)"
+    else
+      summary "⚠️  Validation reported errors (NoTestRun / dry-run)"
+    fi
   else
-    summary "⚠️  Validation failed with primary strategy"
+    if sf project deploy validate "${RUN_ARGS[@]}" > reports/deploy-report.json 2>reports/deploy-report.stderr.log; then
+      summary "✅ Validation passed (${PRIMARY_TEST_LEVEL})"
+    else
+      summary "⚠️  Validation reported errors (${PRIMARY_TEST_LEVEL})"
+    fi
   fi
   # Surface any real CLI stderr for debugging without polluting the JSON report.
   if [ -s reports/deploy-report.stderr.log ]; then
