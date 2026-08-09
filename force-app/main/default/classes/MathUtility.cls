@@ -11,3 +11,4 @@ public with sharing class MathUtility {
         return value != null && Math.mod(value, 2) == 0;
     }
 }
+  

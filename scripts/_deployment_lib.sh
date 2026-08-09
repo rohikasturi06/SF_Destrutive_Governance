@@ -234,6 +234,22 @@ select_test_args() {
     esac
   fi
 
+  # Automatic path — Beta preference (graceful degradation):
+  # When PREFER_RELEVANT_TESTS is enabled AND Apex actually changed, use
+  # RunRelevantTests (Salesforce auto-selects the relevant tests from the deploy
+  # payload — no test-map lookup, no --tests list). The mapped RELATED_TESTS are
+  # left untouched in the environment so the caller (validate_deployment.sh) can
+  # fall back to RunSpecifiedTests if the org rejects the Beta level.
+  # This is deliberately scoped: only callers that set PREFER_RELEVANT_TESTS AND
+  # implement the fallback (PR validation) get this path. Post-merge deploy.sh
+  # does NOT set it, so its behavior is unchanged.
+  if [ "${PREFER_RELEVANT_TESTS:-false}" = "true" ] \
+     && has_source_metadata \
+     && find "$DELTA_SOURCE_DIR" \( -name '*.cls' -o -name '*.trigger' \) 2>/dev/null | grep -q .; then
+    printf '%s\n' "--test-level" "RunRelevantTests"
+    return 0
+  fi
+
   # Automatic path: prefer the auto-discovered tests.
   if [ -n "${RELATED_TESTS:-}" ]; then
     _emit_run_specified_tests "$RELATED_TESTS"
@@ -254,6 +270,54 @@ select_test_args() {
 
   # Nothing to test (metadata-only / destructive-only). This is the default.
   printf '%s\n' "--test-level" "NoTestRun"
+}
+
+# ------------------------------------------------------------------------------
+# relevant_level_rejected <deploy-report.json> <stderr-log>
+# Returns 0 (true) ONLY when a RunRelevantTests validation failed *because the
+# org/CLI does not support the level* — NOT because tests ran and failed.
+#
+# The distinction is critical: falling back on a real test failure would mask it.
+# We treat it as "level unsupported" only when BOTH hold:
+#   (a) the report/stderr carries a signature of an invalid/unknown test level
+#       or an unsupported-feature error, AND
+#   (b) NO test results are present (runTestResult absent / numberTestsTotal 0) —
+#       i.e. the org rejected the request before any Apex test executed.
+# If any tests ran, we NEVER classify it as a rejection.
+# ------------------------------------------------------------------------------
+relevant_level_rejected() {
+  local report="${1:-reports/deploy-report.json}"
+  local errlog="${2:-}"
+
+  # (b) If any tests actually ran, this is NOT an unsupported-level rejection.
+  if [ -f "$report" ]; then
+    if jq -e '.result.details.runTestResult.failures? // empty | length > 0' "$report" >/dev/null 2>&1; then
+      return 1
+    fi
+    local tests_total
+    tests_total=$(jq -r '.result.numberTestsTotal // .result.details.runTestResult.numTestsRun // 0' "$report" 2>/dev/null || echo 0)
+    if [ "${tests_total:-0}" -gt 0 ]; then
+      return 1
+    fi
+  fi
+
+  # (a) Look for the "level not supported / invalid" signature in the report
+  # message and the raw CLI stderr. Salesforce/CLI wording for a Beta level that
+  # is off or unknown includes phrases like "invalid ... test level",
+  # "RunRelevantTests", "not supported", "not enabled", "unknown test level".
+  local haystack=""
+  if [ -f "$report" ]; then
+    haystack="$(jq -r '[.message?, .name?, .result.errorMessage?, (.result.details.componentFailures[]?.problem)?] | map(select(. != null)) | join(" ")' "$report" 2>/dev/null || true)"
+  fi
+  if [ -n "$errlog" ] && [ -f "$errlog" ]; then
+    haystack="$haystack $(cat "$errlog" 2>/dev/null || true)"
+  fi
+
+  printf '%s' "$haystack" | grep -qiE \
+    'RunRelevantTests|invalid[^.]*test[ _-]?level|unknown[^.]*test[ _-]?level|test[ _-]?level[^.]*(not|isn.t)[^.]*(support|enabl|valid|recogn)|feature[^.]*not[^.]*(enabl|support|available)|INVALID_INPUT|INVALID_TYPE' \
+    && return 0
+
+  return 1
 }
 
 # ------------------------------------------------------------------------------

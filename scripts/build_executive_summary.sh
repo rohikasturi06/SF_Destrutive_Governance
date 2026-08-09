@@ -124,6 +124,12 @@ COVERAGE=0
 #   <any run level>     -> print the measured coverage value vs the threshold
 EFFECTIVE_TEST_LEVEL="$(tr -d '[:space:]' < reports/test-level.txt 2>/dev/null || true)"
 
+# Human-readable reason WHY that level was chosen (auto-preferred / mapped /
+# fell back from RunRelevantTests / selected via label). Written by
+# validate_deployment.sh. Shown to end users so it's clear which validation ran
+# and why. Trim surrounding whitespace only (keep internal spaces).
+EFFECTIVE_TEST_REASON="$(sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' reports/test-level-reason.txt 2>/dev/null || true)"
+
 if [ -f reports/deploy-report.json ]; then
   DEPLOY_STATUS=$(jq -r '.result.status // "Unknown"' reports/deploy-report.json 2>/dev/null || echo Unknown)
   if jq -e '.result.details.componentFailures' reports/deploy-report.json >/dev/null 2>&1; then
@@ -208,12 +214,14 @@ case "$EFFECTIVE_TEST_LEVEL" in
     COV_NOTE="NoTestRun — no Apex tests were executed for this run"
     ;;
   *)
+    _REASON_SUFFIX=""
+    [ -n "${EFFECTIVE_TEST_REASON:-}" ] && _REASON_SUFFIX=" · ${EFFECTIVE_TEST_REASON}"
     if [ "${COVERAGE:-0}" -ge "$COVERAGE_THRESHOLD" ]; then
       COV_STATUS="🟢 ${COVERAGE}%"
-      COV_NOTE="${EFFECTIVE_TEST_LEVEL} · ≥ ${COVERAGE_THRESHOLD}% threshold"
+      COV_NOTE="${EFFECTIVE_TEST_LEVEL} · ≥ ${COVERAGE_THRESHOLD}% threshold${_REASON_SUFFIX}"
     else
       COV_STATUS="🔴 ${COVERAGE}%"
-      COV_NOTE="${EFFECTIVE_TEST_LEVEL} · < ${COVERAGE_THRESHOLD}% threshold"
+      COV_NOTE="${EFFECTIVE_TEST_LEVEL} · < ${COVERAGE_THRESHOLD}% threshold${_REASON_SUFFIX}"
     fi
     ;;
 esac
