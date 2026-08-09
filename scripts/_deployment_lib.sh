@@ -234,6 +234,22 @@ select_test_args() {
     esac
   fi
 
+  # Automatic path — Beta preference (graceful degradation):
+  # When PREFER_RELEVANT_TESTS is enabled AND Apex actually changed, use
+  # RunRelevantTests (Salesforce auto-selects the relevant tests from the deploy
+  # payload — no test-map lookup, no --tests list). The mapped RELATED_TESTS are
+  # left untouched in the environment so the caller (validate_deployment.sh) can
+  # fall back to RunSpecifiedTests if the org rejects the Beta level.
+  # This is deliberately scoped: only callers that set PREFER_RELEVANT_TESTS AND
+  # implement the fallback (PR validation) get this path. Post-merge deploy.sh
+  # does NOT set it, so its behavior is unchanged.
+  if [ "${PREFER_RELEVANT_TESTS:-false}" = "true" ] \
+     && has_source_metadata \
+     && find "$DELTA_SOURCE_DIR" \( -name '*.cls' -o -name '*.trigger' \) 2>/dev/null | grep -q .; then
+    printf '%s\n' "--test-level" "RunRelevantTests"
+    return 0
+  fi
+
   # Automatic path: prefer the auto-discovered tests.
   if [ -n "${RELATED_TESTS:-}" ]; then
     _emit_run_specified_tests "$RELATED_TESTS"
