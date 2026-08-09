@@ -112,7 +112,10 @@ if has_any_deployable; then
   # requirement. Block BEFORE touching the org and surface a clear reason in the
   # PR summary — unless the selected level is NoTestRun (no coverage evaluated).
   # --------------------------------------------------------------------------
-  if [ "$PRIMARY_TEST_LEVEL" != "NoTestRun" ] && [ -n "${UNMAPPED_CLASSES:-}" ]; then
+  # RunRelevantTests (Beta) auto-discovers tests from the payload and does NOT
+  # consult config/test-map.yaml, so the "unmapped class" governance gate does
+  # not apply to it (like NoTestRun, it is exempt).
+  if [ "$PRIMARY_TEST_LEVEL" != "NoTestRun" ] && [ "$PRIMARY_TEST_LEVEL" != "RunRelevantTests" ] && [ -n "${UNMAPPED_CLASSES:-}" ]; then
     {
       echo "### 🛑 DEPLOYMENT BLOCKED — Missing Test Mapping"
       echo ""

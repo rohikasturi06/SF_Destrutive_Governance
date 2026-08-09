@@ -26,3 +26,6 @@ DependencyTestHelper:
 # --- Add new mappings below (example) ----------------------------------------
 AccountTriggerHandler:
   - AccountTriggerHandlerTest
+
+MathUtility:
+  - MathUtilityTest

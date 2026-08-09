@@ -25,3 +25,7 @@
 - name: "test-level:RunAllTestsInOrg"
   color: "B60205"
   description: "Full system validation: every test in the org (incl. managed)."
+
+- name: "test-level:RunRelevantTests"
+  color: "5319E7"
+  description: "(Beta) Run only tests relevant to the deployment payload; SF auto-determines them."
