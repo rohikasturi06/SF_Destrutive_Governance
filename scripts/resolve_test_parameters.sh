@@ -43,7 +43,7 @@ MAX_TESTS_HEADER_BYTES="${MAX_TESTS_HEADER_BYTES:-8192}"   # 8 KB REST header ca
 # the fallback list when RunSpecifiedTests is chosen without explicit classes.
 RELATED_TESTS="${RELATED_TESTS:-}"
 
-VALID_LEVELS="NoTestRun RunSpecifiedTests RunLocalTests RunAllTestsInOrg"
+VALID_LEVELS="NoTestRun RunSpecifiedTests RunRelevantTests RunLocalTests RunAllTestsInOrg"
 
 die() { echo "::error::$*" >&2; exit 1; }
 info() { echo "$*" >&2; }
@@ -133,6 +133,8 @@ else
     LABEL_MATCH="NoTestRun"
   elif printf '%s\n' "$PR_LABELS" | grep -q '^test-level:RunSpecifiedTests$'; then
     LABEL_MATCH="RunSpecifiedTests"
+  elif printf '%s\n' "$PR_LABELS" | grep -q '^test-level:RunRelevantTests$'; then
+    LABEL_MATCH="RunRelevantTests"
   elif printf '%s\n' "$PR_LABELS" | grep -q '^test-level:RunAllTestsInOrg$'; then
     LABEL_MATCH="RunAllTestsInOrg"
   elif printf '%s\n' "$PR_LABELS" | grep -q '^test-level:RunLocalTests$'; then
@@ -160,6 +162,8 @@ else
     CHECKBOX_MATCH="NoTestRun"
   elif printf '%s' "$PR_BODY" | grep -qiE '^[[:space:]]*- \[x\].*RunSpecifiedTests'; then
     CHECKBOX_MATCH="RunSpecifiedTests"
+  elif printf '%s' "$PR_BODY" | grep -qiE '^[[:space:]]*- \[x\].*RunRelevantTests'; then
+    CHECKBOX_MATCH="RunRelevantTests"
   elif printf '%s' "$PR_BODY" | grep -qiE '^[[:space:]]*- \[x\].*RunAllTestsInOrg'; then
     CHECKBOX_MATCH="RunAllTestsInOrg"
   elif printf '%s' "$PR_BODY" | grep -qiE '^[[:space:]]*- \[x\].*RunLocalTests'; then
@@ -229,7 +233,7 @@ is_valid_level "$RESOLVED_LEVEL" \
 #   Production -> {            RunSpecifiedTests, RunLocalTests, RunAllTestsInOrg }
 case "$RESOLVED_ENV" in
   production)
-    PERMITTED="RunSpecifiedTests RunLocalTests RunAllTestsInOrg" ;;
+    PERMITTED="RunSpecifiedTests RunRelevantTests RunLocalTests RunAllTestsInOrg" ;;
   sandbox-dev|sandbox-uat)
     PERMITTED="$VALID_LEVELS" ;;
   *)

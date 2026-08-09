@@ -225,7 +225,9 @@ select_test_args() {
         _emit_run_specified_tests "${FORCE_SPECIFIED_TESTS:-${RELATED_TESTS:-}}"
         return 0
         ;;
-      NoTestRun|RunLocalTests|RunAllTestsInOrg)
+      NoTestRun|RunLocalTests|RunAllTestsInOrg|RunRelevantTests)
+        # RunRelevantTests (Beta): Salesforce auto-selects the relevant tests
+        # from the deploy payload — no --tests list, no test-map lookup needed.
         printf '%s\n' "--test-level" "$FORCE_TEST_LEVEL"
         return 0
         ;;
